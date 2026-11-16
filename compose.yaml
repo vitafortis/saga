@@ -1,0 +1,36 @@
+# Saga — paste and file sharing between devices.
+#
+#   cp .env.example .env    # set SAGA_PASSWORD (and SAGA_API_TOKEN for scripts)
+#   docker compose up -d
+#   open http://<this-host>:3040
+#
+services:
+  saga:
+    image: ghcr.io/vitafortis/saga:latest
+    # Or build from this checkout instead of pulling:
+    # build: .
+    container_name: saga
+    restart: unless-stopped
+    ports:
+      - "3040:3000"
+    environment:
+      # Needed to share anything (opening a code never needs it). Without it, anyone who
+      # can reach Saga can upload.
+      SAGA_PASSWORD: ${SAGA_PASSWORD:?Set SAGA_PASSWORD in .env}
+      # Optional: for scripts, `Authorization: Bearer <token>`.
+      SAGA_API_TOKEN: ${SAGA_API_TOKEN:-}
+      # Limits (MB).
+      SAGA_MAX_FILE_MB: ${SAGA_MAX_FILE_MB:-1024}
+      SAGA_MAX_PASTE_MB: ${SAGA_MAX_PASTE_MB:-10}
+      # Behind a TLS reverse proxy (Traefik, Caddy, nginx, Pangolin…): share links use the
+      # public address. ORIGIN pins it; without it, X-Forwarded-Proto/Host are used.
+      # ORIGIN: https://data.armgrp.dev
+      # Real client IPs for rate limits (unknown-code lookups, sign-in attempts):
+      # ADDRESS_HEADER: X-Forwarded-For
+      # XFF_DEPTH: "1"
+    volumes:
+      # Database, uploaded files and the session key.
+      - saga-data:/data
+
+volumes:
+  saga-data:
