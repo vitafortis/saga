@@ -1,6 +1,6 @@
 # Saga — paste and file sharing between devices.
 #
-#   cp .env.example .env    # set SAGA_PASSWORD (and SAGA_API_TOKEN for scripts)
+#   cp .env.example .env    # behind SSO, leave SAGA_PASSWORD empty; otherwise set it
 #   docker compose up -d
 #   open http://<this-host>:3040
 #
@@ -14,10 +14,11 @@ services:
     ports:
       - "3040:3000"
     environment:
-      # Needed to share anything (opening a code never needs it). Without it, anyone who
-      # can reach Saga can upload.
-      SAGA_PASSWORD: ${SAGA_PASSWORD:?Set SAGA_PASSWORD in .env}
-      # Optional: for scripts, `Authorization: Bearer <token>`.
+      # Behind SSO (forward auth on the whole site), leave SAGA_PASSWORD empty: there's no
+      # sign-in and everyone who gets past the IdP can share. Without SSO, set it: it's needed
+      # to share anything (opening a code never needs it).
+      SAGA_PASSWORD: ${SAGA_PASSWORD:-}
+      # Optional, with SAGA_PASSWORD: for scripts, `Authorization: Bearer <token>`.
       SAGA_API_TOKEN: ${SAGA_API_TOKEN:-}
       # Limits (MB).
       SAGA_MAX_FILE_MB: ${SAGA_MAX_FILE_MB:-1024}

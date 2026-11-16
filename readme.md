@@ -15,7 +15,7 @@ https://data.armgrp.dev/12345678   → redirects to the paste or file
 - **Recent**: a list of what you've shared, with view counts, links and delete.
 - **Light and dark** themes, built on the same design system as our other apps.
 
-Signing in is needed only to share. Anyone with a code can open that item, so treat codes like the links they are. Lookups of codes that don't exist are rate-limited per IP (30 per 10 minutes), which makes guessing codes impractical.
+Saga can sit behind your SSO with no sign-in of its own, or use a password of its own for sharing. Anyone who can reach Saga and has a code can open that item, so treat codes like the links they are. Lookups of codes that don't exist are rate-limited per IP (30 per 10 minutes), which makes guessing codes impractical.
 
 ## Running it
 
@@ -25,7 +25,7 @@ Signing in is needed only to share. Anyone with a code can open that item, so tr
 mkdir saga && cd saga
 curl -fsSLO https://raw.githubusercontent.com/vitafortis/saga/main/compose.yaml
 curl -fsSL https://raw.githubusercontent.com/vitafortis/saga/main/.env.example -o .env
-# set SAGA_PASSWORD in .env
+# behind SSO, leave SAGA_PASSWORD empty; otherwise set it in .env
 docker compose up -d
 ```
 
@@ -35,12 +35,18 @@ Then open `http://<host>:3040`. To build from a checkout instead of pulling the 
 
 Point your proxy at port 3040 (or put Saga on the proxy's Docker network and use port 3000). Saga builds share links from `X-Forwarded-Proto` and `X-Forwarded-Host`; to pin the address instead, set `ORIGIN=https://data.armgrp.dev`. Set `ADDRESS_HEADER=X-Forwarded-For` so rate limits see real client IPs rather than the proxy's. If the proxy limits request sizes (nginx defaults to 1 MB), raise that limit to at least `SAGA_MAX_FILE_MB`.
 
+### Behind SSO
+
+Put the whole site behind your IdP's forward auth (Authentik, Authelia, Pomerium, oauth2-proxy, Pangolin…) and leave `SAGA_PASSWORD` empty. Saga then has no sign-in: everyone the IdP lets through can share, see the recent list and delete. Cover every path, `/api/` included, or uploads are open to anyone who finds the address. Every device opening a code goes through the IdP too.
+
+Scripts can't get past forward auth on their own: give them the proxy's own bypass (a service token or API key), or upload from the web app.
+
 ### Settings
 
 | Variable | Default | |
 | --- | --- | --- |
-| `SAGA_PASSWORD` | (required in compose) | Password for sharing and managing items. If it's unset, anyone who can reach Saga can upload. |
-| `SAGA_API_TOKEN` | unset | Token for scripts: `Authorization: Bearer <token>`. |
+| `SAGA_PASSWORD` | unset | Password for sharing and managing items. Unset: no sign-in, anyone who can reach Saga can share (for use behind SSO). |
+| `SAGA_API_TOKEN` | unset | Token for scripts, `Authorization: Bearer <token>`. Only needed with `SAGA_PASSWORD`. |
 | `SAGA_MAX_FILE_MB` | `1024` | Largest file. |
 | `SAGA_MAX_PASTE_MB` | `10` | Largest paste. |
 | `SAGA_CODE_LENGTH` | `8` | Digits in new codes (6–12). |
@@ -50,7 +56,7 @@ Point your proxy at port 3040 (or put Saga on the proxy's Docker network and use
 
 ## From the command line
 
-With `SAGA_API_TOKEN` set:
+With `SAGA_PASSWORD` and `SAGA_API_TOKEN` set (behind SSO, drop the `Authorization` header and use your proxy's bypass instead):
 
 ```sh
 H="Authorization: Bearer $SAGA_API_TOKEN"

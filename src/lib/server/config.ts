@@ -20,7 +20,7 @@ export const MAX_PASTE_BYTES = mb(env.SAGA_MAX_PASTE_MB, 10);
 /** Digits in new shortcodes. */
 export const CODE_LENGTH = Math.min(12, Math.max(6, Number(env.SAGA_CODE_LENGTH) || 8));
 
-if (!PASSWORD) console.warn('[saga] SAGA_PASSWORD is not set: anyone who can reach Saga can upload. Set it before exposing Saga to the internet.');
+if (!PASSWORD) console.warn('[saga] SAGA_PASSWORD is not set, so there is no sign-in: anyone who can reach Saga can share. Fine behind SSO; otherwise set it.');
 
 /** Signs session cookies. SAGA_SECRET, or a random key kept in the data folder. */
 export const SECRET: Buffer = (() => {
