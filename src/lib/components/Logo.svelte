@@ -1,25 +1,18 @@
 <script lang="ts">
 	let { size = 28 }: { size?: number } = $props();
-	// Gradient ids must be unique per instance; the logo appears more than once on some pages.
-	const id = $props.id();
+
+	/** Saga's S: five pills handing off from one to the next, graded from ink to light. */
+	const pills = [
+		{ x: 16, y: 4, w: 40, h: 12, fill: 'fill-[#441b8c] dark:fill-[#795bce]' },
+		{ x: 4, y: 10, w: 12, h: 22, fill: 'fill-[#573a9f] dark:fill-[#8c75da]' },
+		{ x: 16, y: 26, w: 32, h: 12, fill: 'fill-[#6c56b3] dark:fill-[#9f8ee5]' },
+		{ x: 48, y: 32, w: 12, h: 22, fill: 'fill-[#8370c6] dark:fill-[#b3a6ef]' },
+		{ x: 8, y: 48, w: 40, h: 12, fill: 'fill-[#9a8bd9] dark:fill-[#c8bffa]' }
+	];
 </script>
 
-<svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" class="shrink-0">
-	<defs>
-		<linearGradient id="{id}-fill" x1="0" y1="0" x2="1" y2="1">
-			<stop offset="0" stop-color="oklch(72% 0.17 292.717)" />
-			<stop offset="1" stop-color="oklch(48% 0.25 292.717)" />
-		</linearGradient>
-		<linearGradient id="{id}-sheen" x1="0" y1="0" x2="0" y2="1">
-			<stop offset="0" stop-color="#fff" stop-opacity="0.22" />
-			<stop offset="0.5" stop-color="#fff" stop-opacity="0" />
-		</linearGradient>
-	</defs>
-	<rect width="32" height="32" rx="9" fill="url(#{id}-fill)" />
-	<rect width="32" height="32" rx="9" fill="url(#{id}-sheen)" />
-	<!-- Two arrows passing each other: something going from one device to another. -->
-	<g fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-		<path d="M8 12.5h14.5M18.5 8.5l4 4-4 4" />
-		<path d="M24 19.5H9.5M13.5 15.5l-4 4 4 4" stroke-opacity="0.6" />
-	</g>
+<svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" class="shrink-0">
+	{#each pills as p, i (i)}
+		<rect x={p.x} y={p.y} width={p.w} height={p.h} rx="6" class={p.fill} />
+	{/each}
 </svg>

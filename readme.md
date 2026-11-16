@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" width="64" alt="">
+
 # Saga
 
 Self-hosted paste and file sharing for moving things between your own devices. Every paste or file gets a short numeric code, so you can open it on another device by typing the code, scanning the QR code or following the link:
