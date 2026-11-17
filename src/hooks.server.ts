@@ -69,7 +69,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 	}
 
 	const response = await resolve(event);
-	response.headers.set('X-Frame-Options', 'DENY');
+	// DENY unless the response allows framing itself (PDF previews).
+	if (!response.headers.has('X-Frame-Options')) response.headers.set('X-Frame-Options', 'DENY');
 	response.headers.set('X-Content-Type-Options', 'nosniff');
 	// Share links carry the code; never leak them to other sites.
 	response.headers.set('Referrer-Policy', 'no-referrer');

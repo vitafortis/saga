@@ -160,6 +160,7 @@ curl -sH "$H" https://data.armgrp.dev/api/v1/paste/12345678/raw
 | `PATCH`/`DELETE /api/v1/collections/<code>` | Rename / delete. |
 | `POST /api/v1/collections/<code>/items` | Text file: `{ name, content, path?, mode?, encrypted? }`. |
 | `PUT /api/v1/collections/<code>/items?name=&path=&mode=&encrypted=` | File upload into a collection. |
+| `POST /api/v1/collections/<code>/items/copy` | Copy shared items in: `{ codes: [...] }`. The originals keep their links and expiry. |
 | `GET /api/v1/collections/<code>/install.sh` | The install script. |
 | `GET /api/v1/collections/<code>/archive` | Everything as `.tar.gz`. |
 | `POST /api/v1/items/<code>/save` | Copy to the NAS folder: `{ path }`. |

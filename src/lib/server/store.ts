@@ -1,6 +1,6 @@
 import { randomInt } from 'node:crypto';
 import { createWriteStream } from 'node:fs';
-import { readdir, rename, rm, stat } from 'node:fs/promises';
+import { constants, copyFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -170,6 +170,41 @@ export async function createFile(body: ReadableStream<Uint8Array>, name: string,
 	touchCollection(opts.collection);
 	return getItem(code)!;
 }
+
+/**
+ * A copy of an existing item in a collection, under a new code: the original keeps its link,
+ * expiry and views. Burn items can't be copied (reading them is their one open).
+ */
+export async function copyToCollection(code: string, collection: string): Promise<Item> {
+	const item = getItem(code);
+	if (!item) throw new NotFoundError(`${code} not found. It may have expired or been deleted.`);
+	if (item.burn) throw new BurnError(`“${item.name || code}” is deleted after first open, so it can’t be copied`);
+	const copy = newCode();
+	const now = Date.now();
+	const insert = () =>
+		db
+			.prepare(
+				`INSERT INTO items (code, kind, name, mime, size, content, created_at, expires_at, burn, collection, path, mode, encrypted)
+				 SELECT ?, kind, CASE WHEN kind = 'paste' AND name = '' THEN ? ELSE name END, mime, size, content, ?, NULL, 0, ?, NULL, NULL, encrypted FROM items WHERE code = ?`
+			)
+			.run(copy, `${code}.txt`, now, collection, code);
+	if (item.kind === 'file') {
+		// Same order as createFile: blob to a temp name, row, then the blob into place.
+		const tmp = join(BLOB_DIR, `.${copy}.part`);
+		await copyFile(blobPath(code), tmp, constants.COPYFILE_FICLONE);
+		insert();
+		await rename(tmp, blobPath(copy)).catch(async (err) => {
+			db.prepare('DELETE FROM items WHERE code = ?').run(copy);
+			await rm(tmp, { force: true });
+			throw err;
+		});
+	} else insert();
+	touchCollection(collection);
+	return getItem(copy)!;
+}
+
+export class NotFoundError extends Error {}
+export class BurnError extends Error {}
 
 export function touchCollection(code: string | null | undefined) {
 	if (code) db.prepare('UPDATE collections SET updated_at = ? WHERE code = ?').run(Date.now(), code);

@@ -1,11 +1,13 @@
 <script lang="ts">
 	import { Download, Flame, Lock, LockOpen } from '@lucide/svelte';
 	import ItemHeader from '#lib/components/ItemHeader.svelte';
+	import TextView from '#lib/components/TextView.svelte';
 	import Unlock from '#lib/components/Unlock.svelte';
 	import { statusMessage, UNREACHABLE } from '#lib/client/api.ts';
 	import { saveBytes } from '#lib/client/files.ts';
 	import { decrypt } from '#lib/crypto.ts';
 	import { formatBytes } from '#lib/format.ts';
+	import { TEXT_PREVIEW_BYTES } from '#lib/media.ts';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -69,6 +71,14 @@
 		<video {src} controls preload="metadata" class="max-h-[65vh] w-full border-b border-border bg-black"></video>
 	{:else if data.preview === 'audio'}
 		<div class="border-b border-border bg-surface p-5"><audio {src} controls preload="metadata" class="w-full"></audio></div>
+	{:else if data.preview === 'pdf'}
+		<iframe {src} title={data.item.name} class="h-[75vh] w-full border-b border-border bg-surface"></iframe>
+	{:else if data.text}
+		<div class="border-b border-border">
+			<TextView content={data.text.text}>
+				{#snippet note()}{#if data.text?.truncated} · first {formatBytes(TEXT_PREVIEW_BYTES)} shown; download for the rest{/if}{/snippet}
+			</TextView>
+		</div>
 	{/if}
 
 	<div class="flex flex-col items-center gap-4 p-6 text-center sm:flex-row sm:text-left">

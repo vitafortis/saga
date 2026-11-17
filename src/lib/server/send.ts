@@ -1,9 +1,10 @@
 import { createReadStream } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { blobPath, deleteBlob } from './store.ts';
 import type { Item } from '#lib/types.ts';
 
-import { canPreview } from '#lib/media.ts';
+import { canPreview, TEXT_PREVIEW_BYTES } from '#lib/media.ts';
 
 export { canPreview };
 
@@ -31,6 +32,12 @@ export function sendFile(item: Item, request: Request, opts: { inline: boolean; 
 		'content-disposition': contentDisposition(inline ? 'inline' : 'attachment', item.encrypted ? `${item.name}.enc` : item.name),
 		'accept-ranges': opts.burn ? 'none' : 'bytes'
 	};
+	// The browser's PDF viewer won't run in a sandbox, and the file page shows it in a frame.
+	// Still no scripts of the page's own, and only Saga may frame it.
+	if (inline && item.mime === 'application/pdf') {
+		headers['content-security-policy'] = "default-src 'none'; frame-ancestors 'self'";
+		headers['x-frame-options'] = 'SAMEORIGIN';
+	}
 	let start = 0;
 	let end = item.size - 1;
 	let status = 200;
@@ -72,4 +79,26 @@ export function sendText(text: string, name: string, download: boolean): Respons
 export function pasteFileName(item: Item): string {
 	const name = item.name ? (/\.\w{1,8}$/.test(item.name) ? item.name : `${item.name}.txt`) : `${item.code}.txt`;
 	return item.encrypted ? `${name}.b64.enc` : name;
+}
+
+/**
+ * The start of a file, if it's text: no NUL bytes and valid UTF-8. Decided by content, not MIME,
+ * as configs, keys and logs usually arrive as application/octet-stream.
+ */
+export async function textPreview(item: Item): Promise<{ text: string; truncated: boolean } | null> {
+	if (item.size === 0) return { text: '', truncated: false };
+	const fh = await open(blobPath(item.code));
+	try {
+		const buf = Buffer.alloc(Math.min(item.size, TEXT_PREVIEW_BYTES));
+		const { bytesRead } = await fh.read(buf, 0, buf.length, 0);
+		const bytes = buf.subarray(0, bytesRead);
+		if (bytes.includes(0)) return null;
+		// stream: a character cut off at the end of the sample isn't an error.
+		const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes, { stream: bytesRead < item.size });
+		return { text, truncated: bytesRead < item.size };
+	} catch {
+		return null;
+	} finally {
+		await fh.close();
+	}
 }

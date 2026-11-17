@@ -1,7 +1,13 @@
-/** Media the browser can show without running anything (no SVG, HTML or PDF). */
-const INLINE = /^(image\/(png|jpeg|gif|webp|avif|bmp)|video\/(mp4|webm|ogg|quicktime)|audio\/[\w.+-]+)$/;
+/**
+ * Media the browser can show without running anything of ours. SVG is fine: it's shown in an
+ * <img> (no scripts) and served with a sandbox CSP. PDF opens in the browser's own viewer. Never HTML.
+ */
+const INLINE = /^(image\/(png|jpeg|gif|webp|avif|bmp|svg\+xml)|video\/(mp4|webm|ogg|quicktime)|audio\/[\w.+-]+|application\/pdf)$/;
 
 export const canPreview = (mime: string) => INLINE.test(mime);
+
+/** How much of a text file the file page shows. */
+export const TEXT_PREVIEW_BYTES = 256 * 1024;
 
 /** Rough family of a MIME type, for icons. */
 export function mediaKind(mime: string): 'image' | 'video' | 'audio' | 'archive' | 'text' | 'other' {

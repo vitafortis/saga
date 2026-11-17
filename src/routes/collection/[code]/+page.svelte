@@ -5,6 +5,8 @@
 		Download,
 		File as FileIcon,
 		FilePlus,
+		FolderInput,
+		Search,
 		FileText,
 		FolderOpen,
 		HardDriveDownload,
@@ -18,6 +20,7 @@
 		Upload,
 		X
 	} from '@lucide/svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { slide } from 'svelte/transition';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
@@ -159,6 +162,34 @@
 		uploading = null;
 		invalidateAll();
 	}
+	// Add existing: copies items from Recent in, under new codes; the originals stay as they are.
+	let picking = $state(false);
+	let pickQuery = $state('');
+	let adding = $state(false);
+	const toAdd = new SvelteSet<string>();
+	const pickable = $derived.by(() => {
+		const q = pickQuery.trim().toLowerCase();
+		const digits = q.replace(/\s/g, '');
+		return data.shared.filter((i) => !q || i.name.toLowerCase().includes(q) || (/^\d+$/.test(digits) && i.code.includes(digits)));
+	});
+	function closePicker() {
+		picking = false;
+		pickQuery = '';
+		toAdd.clear();
+	}
+	async function addExisting() {
+		adding = true;
+		try {
+			const { items } = await api.post<{ items: Item[] }>(`/api/collections/${c.code}/items/copy`, { codes: [...toAdd] });
+			toast('success', items.length === 1 ? 'File added' : `${items.length} files added`, 'Copied in; the originals keep their links. Set a target path to install them.');
+			closePicker();
+		} catch (err) {
+			toast('error', 'Couldn’t add', errorMessage(err));
+		}
+		adding = false;
+		invalidateAll();
+	}
+
 	const isFileDrag = (e: DragEvent) => !!authed && !!e.dataTransfer?.types.includes('Files');
 </script>
 
@@ -331,6 +362,7 @@
 				<Lock class="size-4 {locked ? 'text-primary' : ''}" />Encrypt
 			</label>
 			<button class="btn btn-secondary btn-sm" onclick={newText}><FilePlus />New text file</button>
+			<button class="btn btn-secondary btn-sm" onclick={() => (picking ? closePicker() : (picking = true))} title="Copy in something you've already shared"><FolderInput />Add existing</button>
 			<label class="btn btn-primary btn-sm cursor-pointer">
 				{#if uploading}<LoaderCircle class="animate-spin" />{Math.round(uploading.progress * 100)}%{:else}<Upload />Upload{/if}
 				<input type="file" multiple class="sr-only" disabled={!!uploading} onchange={(e) => upload(e.currentTarget.files)} />
@@ -338,6 +370,46 @@
 		</div>
 	{/if}
 </div>
+
+{#if picking}
+	<div transition:slide={{ duration: 160 }} class="card mb-3 overflow-hidden">
+		<div class="flex items-center gap-2 border-b border-border px-3 py-2">
+			<Search class="size-3.5 shrink-0 text-muted-foreground" />
+			<!-- svelte-ignore a11y_autofocus -->
+			<input class="input h-8 flex-1 border-0 bg-transparent px-1 text-[0.8125rem] shadow-none focus:ring-0" type="search" placeholder="Search shared items by name or code" bind:value={pickQuery} autofocus />
+			<button class="btn btn-ghost btn-icon btn-sm" onclick={closePicker} aria-label="Close"><X /></button>
+		</div>
+		{#if data.shared.length === 0}
+			<p class="px-4 py-8 text-center text-[0.8125rem] text-muted-foreground">Nothing shared yet. Items you share from the home page show up here.</p>
+		{:else if pickable.length === 0}
+			<p class="px-4 py-8 text-center text-[0.8125rem] text-muted-foreground">Nothing matches.</p>
+		{:else}
+			<div class="max-h-80 divide-y divide-border overflow-y-auto">
+				{#each pickable as item (item.code)}
+					<label class="flex cursor-pointer items-center gap-3 px-4 py-2 hover:bg-surface {toAdd.has(item.code) ? 'bg-primary-soft/50' : ''}">
+						<input
+							type="checkbox"
+							class="size-4 shrink-0 accent-[var(--primary)]"
+							checked={toAdd.has(item.code)}
+							onchange={(e) => (e.currentTarget.checked ? toAdd.add(item.code) : toAdd.delete(item.code))}
+						/>
+						<span class="text-muted-foreground [&_svg]:size-4">{#if item.kind === 'paste'}<FileText />{:else}<FileIcon />{/if}</span>
+						<span class="min-w-0 flex-1 truncate text-[0.8125rem]">{item.name || 'Untitled paste'}</span>
+						{#if item.encrypted}<Lock class="size-3.5 text-primary" />{/if}
+						<span class="font-mono text-xs text-muted-foreground">{groupCode(item.code)}</span>
+						<span class="hidden text-xs text-muted-foreground tabular-nums sm:inline">{formatBytes(item.size)}</span>
+					</label>
+				{/each}
+			</div>
+		{/if}
+		<div class="flex items-center gap-3 border-t border-border bg-surface px-4 py-2.5">
+			<p class="text-xs text-muted-foreground">Copies them in to keep for good. Items deleted after first open can't be added.</p>
+			<button class="btn btn-primary btn-sm ml-auto" disabled={!toAdd.size || adding} onclick={addExisting}>
+				{#if adding}<LoaderCircle class="animate-spin" />{/if}Add {toAdd.size || ''}
+			</button>
+		</div>
+	</div>
+{/if}
 
 {#if locked}
 	<div transition:slide={{ duration: 160 }} class="card mb-3 p-3"><PasswordFields bind:password bind:confirm={confirmPw} /></div>

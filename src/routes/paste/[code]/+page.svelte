@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { Copy, Download, Eye, FileCode, Flame, LoaderCircle, WrapText } from '@lucide/svelte';
+	import { Copy, Download, Eye, FileCode, Flame, LoaderCircle } from '@lucide/svelte';
 	import ItemHeader from '#lib/components/ItemHeader.svelte';
+	import TextView from '#lib/components/TextView.svelte';
 	import Unlock from '#lib/components/Unlock.svelte';
 	import { api, errorMessage } from '#lib/client/api.ts';
 	import { saveBytes } from '#lib/client/files.ts';
@@ -12,12 +13,9 @@
 
 	let revealed = $state<string | null>(null);
 	let opening = $state(false);
-	let wrap = $state(false);
 	// Encrypted: the server's text is ciphertext; what's shown is what the password unlocks.
 	let plain = $state<string | null>(null);
 	const content = $derived(data.item.encrypted ? plain : (data.content ?? revealed));
-	const lines = $derived(content === null ? 0 : content.split('\n').length);
-	const numbers = $derived(Array.from({ length: lines }, (_, i) => i + 1).join('\n'));
 	const fileName = $derived(data.item.name ? (/\.\w{1,8}$/.test(data.item.name) ? data.item.name : `${data.item.name}.txt`) : `${data.item.code}.txt`);
 
 	async function reveal() {
@@ -87,16 +85,5 @@
 			<Flame class="size-3.5" />This paste has been deleted from the server. It stays here until you leave the page.
 		</p>
 	{/if}
-	<div class="card overflow-hidden">
-		<div class="flex items-center justify-between border-b border-border bg-surface px-4 py-1.5 text-xs text-muted-foreground">
-			<span class="tabular-nums">{lines} {lines === 1 ? 'line' : 'lines'}</span>
-			<button class="btn btn-ghost btn-sm {wrap ? 'text-foreground' : ''}" onclick={() => (wrap = !wrap)} aria-pressed={wrap}><WrapText />Wrap</button>
-		</div>
-		<div class="flex max-h-[75vh] overflow-auto font-mono text-[0.8125rem] leading-relaxed">
-			{#if !wrap}
-				<pre aria-hidden="true" class="sticky left-0 shrink-0 border-r border-border bg-card px-3 py-3 text-right text-muted-foreground/60 select-none">{numbers}</pre>
-			{/if}
-			<pre class="min-w-0 flex-1 px-4 py-3 {wrap ? 'break-words whitespace-pre-wrap' : ''}">{content}</pre>
-		</div>
-	</div>
+	<div class="card overflow-hidden"><TextView content={content ?? ''} /></div>
 {/if}
