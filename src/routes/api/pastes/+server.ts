@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { MAX_PASTE_BYTES } from '#lib/server/config.ts';
 import { created } from '#lib/server/created.ts';
 import { requireAuth } from '#lib/server/lookup.ts';
+import { isExpiry } from '#lib/types.ts';
 import { burnParam } from '#lib/server/settings.ts';
 import { createPaste } from '#lib/server/store.ts';
 import type { RequestHandler } from './$types';
@@ -30,6 +31,7 @@ export const POST: RequestHandler = async (event) => {
 	} else {
 		content = await request.text();
 	}
+	if (expiry && !isExpiry(expiry)) error(400, 'expiry is one of 10m, 1h, 1d, 7d, 30d, never');
 	if (!content.trim()) error(400, 'The paste is empty');
 	if (Buffer.byteLength(content) > MAX_PASTE_BYTES) error(413, `Pastes can be up to ${Math.round(MAX_PASTE_BYTES / 1048576)} MB`);
 	return created(createPaste(content, title.trim(), { expiry, burn }), event.locals.origin, request);
