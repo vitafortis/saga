@@ -3,9 +3,9 @@ import { Readable } from 'node:stream';
 import { blobPath, deleteBlob } from './store.ts';
 import type { Item } from '#lib/types.ts';
 
-/** Media the browser can show without running anything (no SVG, HTML or PDF). */
-const INLINE = /^(image\/(png|jpeg|gif|webp|avif|bmp)|video\/(mp4|webm|ogg|quicktime)|audio\/[\w.+-]+)$/;
-export const canPreview = (mime: string) => INLINE.test(mime);
+import { canPreview } from '#lib/media.ts';
+
+export { canPreview };
 
 export function contentDisposition(kind: 'inline' | 'attachment', name: string): string {
 	const ascii = name.replace(/[^\x20-\x7e]|["\\]/g, '_');

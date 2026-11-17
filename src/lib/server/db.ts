@@ -18,5 +18,9 @@ db.exec(`
 		burn INTEGER NOT NULL DEFAULT 0,
 		views INTEGER NOT NULL DEFAULT 0
 	);
+	CREATE TABLE IF NOT EXISTS settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
 	CREATE INDEX IF NOT EXISTS items_expires ON items (expires_at) WHERE expires_at IS NOT NULL;
 `);

@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { MAX_FILE_BYTES } from '#lib/server/config.ts';
 import { created } from '#lib/server/created.ts';
 import { requireAuth } from '#lib/server/lookup.ts';
+import { burnParam } from '#lib/server/settings.ts';
 import { createFile, TooLargeError } from '#lib/server/store.ts';
 import type { RequestHandler } from './$types';
 
@@ -19,7 +20,7 @@ const upload: RequestHandler = async (event) => {
 	try {
 		const item = await createFile(request.body, name, /^[\w.+-]+\/[\w.+-]+$/.test(mime) ? mime : '', {
 			expiry: url.searchParams.get('expiry'),
-			burn: url.searchParams.has('burn')
+			burn: burnParam(url.searchParams.get('burn'))
 		});
 		return created(item, event.locals.origin, request);
 	} catch (err) {

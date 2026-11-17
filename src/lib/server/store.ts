@@ -6,7 +6,8 @@ import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { BLOB_DIR, CODE_LENGTH, MAX_FILE_BYTES } from './config.ts';
 import { db } from './db.ts';
-import { EXPIRY_OPTIONS, type Expiry, type Item } from '#lib/types.ts';
+import { EXPIRY_OPTIONS, isExpiry, type Expiry, type Item } from '#lib/types.ts';
+import { getSettings } from './settings.ts';
 
 type Row = {
 	code: string;
@@ -43,8 +44,10 @@ export function blobPath(code: string): string {
 	return join(BLOB_DIR, code);
 }
 
+/** When an item made now expires; a missing or unknown `expiry` uses the default from Settings. */
 export function expiresAt(expiry: string | null | undefined, now = Date.now()): number | null {
-	const opt = EXPIRY_OPTIONS.find((o) => o.value === expiry) ?? EXPIRY_OPTIONS.find((o) => o.value === '1d')!;
+	const value = isExpiry(expiry) ? expiry : getSettings().defaultExpiry;
+	const opt = EXPIRY_OPTIONS.find((o) => o.value === value)!;
 	return opt.ms === null ? null : now + opt.ms;
 }
 
@@ -135,6 +138,14 @@ export function listItems(): Item[] {
 		.prepare(`SELECT ${COLUMNS} FROM items WHERE expires_at IS NULL OR expires_at > ? ORDER BY created_at DESC LIMIT 200`)
 		.all(Date.now()) as Row[];
 	return rows.map(toItem);
+}
+
+export function usage(): { count: number; bytes: number } {
+	const r = db.prepare('SELECT COUNT(*) AS count, COALESCE(SUM(size), 0) AS bytes FROM items WHERE expires_at IS NULL OR expires_at > ?').get(Date.now()) as {
+		count: number;
+		bytes: number;
+	};
+	return { count: Number(r.count), bytes: Number(r.bytes) };
 }
 
 export async function deleteItem(code: string): Promise<boolean> {

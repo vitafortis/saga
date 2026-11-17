@@ -14,7 +14,8 @@ https://data.armgrp.dev/12345678   → redirects to the paste or file
 - **Files**: drag and drop, paste from the clipboard (screenshots), or browse; several at once, with upload progress. Images, video and audio preview in the page. Uploads stream to disk, so large files don't use much memory.
 - **Expiry**: 10 minutes, 1 hour, 1 day (default), 1 week, 30 days or never. Expired items are removed every 5 minutes.
 - **Delete after first open**: the item can be opened once, then it's gone. Opening takes a deliberate click (a POST), so link previews in chat apps don't use it up.
-- **Recent**: a list of what you've shared, with view counts, links and delete.
+- **Recent**: an index of what you've shared, with search, Text/Files filters, image thumbnails, view counts, links and delete.
+- **Settings**: default expiry and delete-after-first-open for new items, kept on the server so every device and script gets them.
 - **Light and dark** themes, built on the same design system as our other apps.
 
 Saga can sit behind your SSO with no sign-in of its own, or use a password of its own for sharing. Anyone who can reach Saga and has a code can open that item, so treat codes like the links they are. Lookups of codes that don't exist are rate-limited per IP (30 per 10 minutes), which makes guessing codes impractical.
@@ -77,7 +78,7 @@ curl -sOJ https://data.armgrp.dev/file/87654321/download
 curl -sOJ -X POST https://data.armgrp.dev/file/87654321/download   # delete-after-open items
 ```
 
-Options go in the query string: `expiry` (`10m`, `1h`, `1d`, `7d`, `30d`, `never`), `burn` (delete after first open) and `title` (pastes). Send `Accept: application/json` to get `{ item, url }` back instead of the bare link.
+Options go in the query string: `expiry` (`10m`, `1h`, `1d`, `7d`, `30d`, `never`), `burn` (delete after first open; `burn=0` to turn off) and `title` (pastes). Left out, `expiry` and `burn` use the defaults from Settings. Send `Accept: application/json` to get `{ item, url }` back instead of the bare link.
 
 | Route | |
 | --- | --- |
@@ -87,6 +88,7 @@ Options go in the query string: `expiry` (`10m`, `1h`, `1d`, `7d`, `30d`, `never
 | `DELETE /api/items/<code>` | Delete an item. |
 | `GET /paste/<code>/raw` | Paste as text (`?download` to save it). |
 | `GET /file/<code>/download` | File as an attachment; supports `Range`. |
+| `GET`/`PUT /api/settings` | `{ defaultExpiry, defaultBurn }`. |
 | `GET /api/health` | `{ ok: true }` |
 
 ## Development

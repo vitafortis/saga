@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { LogIn, LogOut } from '@lucide/svelte';
+	import { LogIn, LogOut, Settings } from '@lucide/svelte';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api } from '#lib/client/api.ts';
@@ -23,6 +23,14 @@
 		<div class="flex-1"></div>
 		<CodeJump />
 		<ThemeToggle />
+		{#if page.data.authed}
+			<a
+				class="btn btn-ghost btn-icon {page.url.pathname === '/settings' ? 'bg-accent text-foreground' : ''}"
+				href="/settings"
+				aria-label="Settings"
+				title="Settings"><Settings /></a
+			>
+		{/if}
 		{#if page.data.passwordRequired}
 			{#if page.data.authed}
 				<button class="btn btn-ghost btn-icon" onclick={signOut} aria-label="Sign out" title="Sign out"><LogOut /></button>

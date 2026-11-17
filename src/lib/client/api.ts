@@ -22,6 +22,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
 export const api = {
 	get: <T>(url: string) => request<T>('GET', url),
 	post: <T>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}),
+	put: <T>(url: string, body: unknown) => request<T>('PUT', url, body),
 	del: <T>(url: string) => request<T>('DELETE', url)
 };
 
@@ -37,7 +38,7 @@ export function uploadFile(
 ): { done: Promise<{ item: import('#lib/types.ts').Item; url: string }>; abort: () => void } {
 	const xhr = new XMLHttpRequest();
 	const q = new URLSearchParams({ name: file.name, expiry: opts.expiry });
-	if (opts.burn) q.set('burn', '1');
+	q.set('burn', opts.burn ? '1' : '0');
 	const done = new Promise<{ item: import('#lib/types.ts').Item; url: string }>((resolve, reject) => {
 		xhr.open('PUT', `/api/files?${q}`);
 		xhr.setRequestHeader('accept', 'application/json');

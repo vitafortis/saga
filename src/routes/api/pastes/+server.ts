@@ -2,6 +2,7 @@ import { error } from '@sveltejs/kit';
 import { MAX_PASTE_BYTES } from '#lib/server/config.ts';
 import { created } from '#lib/server/created.ts';
 import { requireAuth } from '#lib/server/lookup.ts';
+import { burnParam } from '#lib/server/settings.ts';
 import { createPaste } from '#lib/server/store.ts';
 import type { RequestHandler } from './$types';
 
@@ -18,14 +19,14 @@ export const POST: RequestHandler = async (event) => {
 	let content: string;
 	let title = url.searchParams.get('title') ?? '';
 	let expiry = url.searchParams.get('expiry');
-	let burn = url.searchParams.has('burn');
+	let burn = burnParam(url.searchParams.get('burn'));
 	if (request.headers.get('content-type')?.includes('application/json')) {
 		const body = (await request.json().catch(() => null)) as { content?: unknown; title?: unknown; expiry?: unknown; burn?: unknown } | null;
 		if (!body || typeof body.content !== 'string') error(400, 'content is required');
 		content = body.content;
 		if (typeof body.title === 'string') title = body.title;
 		if (typeof body.expiry === 'string') expiry = body.expiry;
-		burn = body.burn === true;
+		if (typeof body.burn === 'boolean') burn = body.burn;
 	} else {
 		content = await request.text();
 	}

@@ -1,6 +1,24 @@
 <script lang="ts">
-	import { Clock, Copy, File as FileIcon, FileText, Flame, LoaderCircle, LogIn, Send, Trash2, Upload, X } from '@lucide/svelte';
-	import { onMount } from 'svelte';
+	import {
+		Clock,
+		Copy,
+		File as FileIcon,
+		FileArchive,
+		FileAudio,
+		FileCode,
+		FileImage,
+		FileText,
+		FileVideo,
+		Flame,
+		LoaderCircle,
+		LogIn,
+		Search,
+		Send,
+		Trash2,
+		Upload,
+		X
+	} from '@lucide/svelte';
+	import { onMount, untrack } from 'svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import CodeJump from '#lib/components/CodeJump.svelte';
@@ -8,6 +26,7 @@
 	import { api, errorMessage, uploadFile } from '#lib/client/api.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
 	import { formatBytes, groupCode, relativeTime } from '#lib/format.ts';
+	import { canPreview, mediaKind } from '#lib/media.ts';
 	import { EXPIRY_OPTIONS, type Item } from '#lib/types.ts';
 	import type { PageProps } from './$types';
 
@@ -19,8 +38,9 @@
 	let title = $state('');
 	let content = $state('');
 	let files = $state<File[]>([]);
-	let expiry = $state('1d');
-	let burn = $state(false);
+	// Start from the saved defaults (Settings); later changes to them don't reset a draft.
+	let expiry = $state<string>(untrack(() => data.settings.defaultExpiry));
+	let burn = $state(untrack(() => data.settings.defaultBurn));
 	let busy = $state(false);
 	let progress = $state(0);
 	let abort: (() => void) | null = null;
@@ -41,6 +61,8 @@
 		content = '';
 		files = [];
 		progress = 0;
+		expiry = data.settings.defaultExpiry;
+		burn = data.settings.defaultBurn;
 	}
 
 	function addFiles(list: FileList | File[] | null | undefined) {
@@ -103,6 +125,27 @@
 	}
 
 	const isFileDrag = (e: DragEvent) => e.dataTransfer?.types.includes('Files');
+
+	// The Recent index: filter by kind, then search name, code (spaces optional) and type.
+	let kind = $state<'all' | 'paste' | 'file'>('all');
+	let query = $state('');
+	const counts = $derived({
+		all: data.items.length,
+		paste: data.items.filter((i) => i.kind === 'paste').length,
+		file: data.items.filter((i) => i.kind === 'file').length
+	});
+	const shown = $derived.by(() => {
+		const q = query.trim().toLowerCase();
+		const digits = q.replace(/\s/g, '');
+		return data.items.filter(
+			(i) =>
+				(kind === 'all' || i.kind === kind) &&
+				(!q || i.name.toLowerCase().includes(q) || i.mime.includes(q) || (/^\d+$/.test(digits) && i.code.includes(digits)))
+		);
+	});
+	const ICONS = { image: FileImage, video: FileVideo, audio: FileAudio, archive: FileArchive, text: FileCode, other: FileIcon };
+	// Burn items can't be fetched without using them up, so they never get a thumbnail.
+	const thumb = (i: Item) => i.kind === 'file' && !i.burn && mediaKind(i.mime) === 'image' && canPreview(i.mime);
 </script>
 
 <svelte:head><title>Saga</title></svelte:head>
@@ -241,16 +284,45 @@
 	{/if}
 
 	<section class="mt-10">
-		<h2 class="mb-3 text-sm font-semibold tracking-tight">Recent</h2>
+		<div class="mb-3 flex flex-wrap items-center gap-3">
+			<h2 class="text-sm font-semibold tracking-tight">Recent</h2>
+			<div class="flex rounded-lg border border-border bg-surface p-0.5">
+				{#each [{ id: 'all', label: 'All' }, { id: 'paste', label: 'Text' }, { id: 'file', label: 'Files' }] as f (f.id)}
+					<button
+						class="flex h-6 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium transition-colors {kind === f.id
+							? 'bg-card text-foreground shadow-surface'
+							: 'text-muted-foreground hover:text-foreground'}"
+						onclick={() => (kind = f.id as typeof kind)}
+						aria-pressed={kind === f.id}
+					>
+						{f.label}<span class="tabular-nums opacity-60">{counts[f.id as typeof kind]}</span>
+					</button>
+				{/each}
+			</div>
+			<div class="relative ml-auto w-full sm:w-64">
+				<Search class="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+				<input class="input h-8 pl-8 text-[0.8125rem]" type="search" placeholder="Search names, codes, types" bind:value={query} />
+			</div>
+		</div>
 		{#if data.items.length === 0}
 			<div class="card dot-grid px-4 py-10 text-center text-[0.8125rem] text-muted-foreground">Nothing shared yet.</div>
+		{:else if shown.length === 0}
+			<div class="card px-4 py-10 text-center text-[0.8125rem] text-muted-foreground">
+				Nothing matches.
+				<button class="ml-1 text-primary hover:underline" onclick={() => ((query = ''), (kind = 'all'))}>Clear filters</button>
+			</div>
 		{:else}
 			<div class="card divide-y divide-border overflow-hidden">
-				{#each data.items as item (item.code)}
+				{#each shown as item (item.code)}
+					{@const Icon = item.kind === 'paste' ? FileText : ICONS[mediaKind(item.mime)]}
 					<div class="group flex items-center gap-3 px-4 py-2.5 hover:bg-surface">
-						<div class="grid size-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground [&_svg]:size-4">
-							{#if item.kind === 'paste'}<FileText />{:else}<FileIcon />{/if}
-						</div>
+						<a href="/{item.kind}/{item.code}" class="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-muted-foreground [&_svg]:size-4" tabindex="-1">
+							{#if thumb(item)}
+								<img src="/file/{item.code}/download?inline" alt="" loading="lazy" class="size-full object-cover" />
+							{:else}
+								<Icon />
+							{/if}
+						</a>
 						<a href="/{item.kind}/{item.code}" class="min-w-0 flex-1">
 							<p class="truncate text-[0.8125rem] font-medium">{item.name || 'Untitled paste'}</p>
 							<p class="truncate text-xs text-muted-foreground">
@@ -272,6 +344,9 @@
 					</div>
 				{/each}
 			</div>
+			{#if shown.length !== data.items.length}
+				<p class="mt-2 text-[0.6875rem] text-muted-foreground">Showing {shown.length} of {data.items.length}</p>
+			{/if}
 		{/if}
 	</section>
 {/if}

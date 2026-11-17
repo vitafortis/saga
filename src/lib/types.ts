@@ -27,3 +27,13 @@ export const EXPIRY_OPTIONS = [
 ] as const;
 
 export type Expiry = (typeof EXPIRY_OPTIONS)[number]['value'];
+
+/** Defaults for new items, kept on the server so every device (and curl) gets the same ones. */
+export type Settings = {
+	defaultExpiry: Expiry;
+	defaultBurn: boolean;
+};
+
+export const DEFAULT_SETTINGS: Settings = { defaultExpiry: '1d', defaultBurn: false };
+
+export const isExpiry = (v: unknown): v is Expiry => EXPIRY_OPTIONS.some((o) => o.value === v);
