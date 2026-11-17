@@ -25,10 +25,10 @@ function archiveName(item: Item): string {
 }
 
 /** Names unique within the archive: a second `config.yaml` becomes `config (2).yaml`. */
-function uniqueNames(items: Item[]): string[] {
+function uniqueNames(items: Item[], nameOf: (item: Item) => string): string[] {
 	const seen = new Map<string, number>();
 	return items.map((item) => {
-		const name = archiveName(item);
+		const name = nameOf(item);
 		const n = (seen.get(name) ?? 0) + 1;
 		seen.set(name, n);
 		return n === 1 ? name : name.replace(/(\.[^./]+)?$/, ` (${n})$1`);
@@ -85,8 +85,8 @@ export function tarGz(entries: Iterable<TarEntry> | AsyncIterable<TarEntry>): Re
 }
 
 /** The collection as a .tar.gz, streamed: files at their target paths (or by name). */
-export function archive(items: Item[]): ReadableStream {
-	const names = uniqueNames(items);
+export function archive(items: Item[], nameOf = archiveName): ReadableStream {
+	const names = uniqueNames(items, nameOf);
 	const entries = items.map((item, i) => ({
 		path: names[i],
 		size: contentSize(item),

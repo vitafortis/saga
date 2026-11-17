@@ -155,7 +155,7 @@ curl -sH "$H" https://data.armgrp.dev/api/v1/paste/12345678/raw
 | `GET /api/v1/paste/<code>/raw` | Paste text (`POST` for delete-after-open ones). |
 | `GET /api/v1/file/<code>/download` | File, with `Range` support (`POST` for delete-after-open ones). |
 | `GET /api/v1/items` | Everything shared (not in collections). |
-| `PATCH`/`DELETE /api/v1/items/<code>` | `{ name?, content?, path?, mode? }` / delete. |
+| `PATCH`/`DELETE /api/v1/items/<code>` | `{ name?, content?, expiry?, path?, mode? }` / delete. `expiry` counts from now; `"never"` keeps an item that was set to expire. |
 | `GET`/`POST /api/v1/collections` | List / create `{ name, description? }`. |
 | `PATCH`/`DELETE /api/v1/collections/<code>` | Rename / delete. |
 | `POST /api/v1/collections/<code>/items` | Text file: `{ name, content, path?, mode?, encrypted? }`. |

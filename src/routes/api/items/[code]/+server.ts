@@ -1,10 +1,14 @@
 import { error, json } from '@sveltejs/kit';
 import { MAX_PASTE_BYTES } from '#lib/server/config.ts';
 import { requireAuth } from '#lib/server/lookup.ts';
-import { cleanMode, cleanPath, deleteItem, getItem, isEncryptedText, updateItem } from '#lib/server/store.ts';
+import { cleanMode, cleanPath, deleteItem, expiresAt, getItem, isEncryptedText, updateItem } from '#lib/server/store.ts';
+import { isExpiry } from '#lib/types.ts';
 import type { RequestHandler } from './$types';
 
-/** `{ name?, content? }`, plus `{ path?, mode? }` for items in a collection. */
+/**
+ * `{ name?, content?, expiry? }`, plus `{ path?, mode? }` for items in a collection. `expiry` is
+ * counted from now; `"never"` keeps an item that was set to expire.
+ */
 export const PATCH: RequestHandler = async (event) => {
 	requireAuth(event);
 	const item = getItem(event.params.code);
@@ -19,6 +23,11 @@ export const PATCH: RequestHandler = async (event) => {
 		// Encrypted text can only be replaced with other ciphertext (re-encrypted in the browser).
 		if (item.encrypted && !isEncryptedText(body.content.trim())) error(400, 'This file is encrypted; send encrypted content');
 		changes.content = item.encrypted ? body.content.trim() : body.content;
+	}
+	if ('expiry' in body) {
+		if (!isExpiry(body.expiry)) error(400, 'expiry must be one of 10m, 1h, 1d, 7d, 30d, never');
+		if (item.collection) error(400, 'Items in a collection never expire');
+		changes.expiresAt = expiresAt(body.expiry);
 	}
 	if (('path' in body || 'mode' in body) && !item.collection) error(400, 'Only items in a collection have a path');
 	if ('path' in body) {

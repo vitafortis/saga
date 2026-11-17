@@ -1,7 +1,9 @@
 <script lang="ts">
 	import {
 		Clock,
+		Infinity as Forever,
 		Copy,
+		Download,
 		File as FileIcon,
 		FileArchive,
 		FileAudio,
@@ -22,12 +24,14 @@
 		X
 	} from '@lucide/svelte';
 	import { onMount, untrack } from 'svelte';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import CodeJump from '#lib/components/CodeJump.svelte';
 	import PasswordFields, { passwordProblem } from '#lib/components/PasswordFields.svelte';
 	import ShareResult from '#lib/components/ShareResult.svelte';
-	import { api, errorMessage, uploadFile } from '#lib/client/api.ts';
+	import { api, errorMessage, readBytes, uploadFile } from '#lib/client/api.ts';
+	import { droppedFiles, folderMessage } from '#lib/client/files.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
 	import { encrypt, encryptText } from '#lib/crypto.ts';
 	import { formatBytes, groupCode, relativeTime } from '#lib/format.ts';
@@ -100,7 +104,7 @@
 				for (const file of files) {
 					const q = new URLSearchParams({ name: file.name, expiry, burn: burn ? '1' : '0', encrypted: locked ? '1' : '0' });
 					// Held in memory to encrypt: fine for keys and documents, slow for huge videos.
-					const body = locked ? new File([await encrypt(new Uint8Array(await file.arrayBuffer()), password)], file.name, { type: file.type }) : file;
+					const body = locked ? new File([await encrypt(await readBytes(file), password)], file.name, { type: file.type }) : file;
 					const up = uploadFile<Shared>(body, `/api/files?${q}`, (f) => (progress = (sent + f * file.size) / total));
 					abort = up.abort;
 					out.push(await up.done);
@@ -173,6 +177,45 @@
 				(!q || i.name.toLowerCase().includes(q) || i.mime.includes(q) || (/^\d+$/.test(digits) && i.code.includes(digits)))
 		);
 	});
+	// Ticked rows in Recent, for downloading, keeping or deleting several at once.
+	const selected = new SvelteSet<string>();
+	const picked = $derived(data.items.filter((i) => selected.has(i.code)));
+	const allShown = $derived(shown.length > 0 && shown.every((i) => selected.has(i.code)));
+	$effect(() => {
+		// Drop codes that have gone (deleted, expired) so the count stays honest.
+		const live = new Set(data.items.map((i) => i.code));
+		for (const code of untrack(() => [...selected])) if (!live.has(code)) selected.delete(code);
+	});
+	function toggleAll() {
+		if (allShown) for (const i of shown) selected.delete(i.code);
+		else for (const i of shown) selected.add(i.code);
+	}
+	const pickedBurn = $derived(picked.filter((i) => i.burn));
+	const downloadUrl = $derived(`/download?codes=${picked.map((i) => i.code).join(',')}`);
+
+	/** Clears the expiry: the item stays until it's deleted. */
+	async function keep(items: Item[]) {
+		const due = items.filter((i) => i.expiresAt);
+		try {
+			for (const i of due) await api.patch(`/api/items/${i.code}`, { expiry: 'never' });
+			toast('success', due.length === 1 ? 'Kept' : `Kept ${due.length} items`, 'They won’t expire now.');
+		} catch (err) {
+			toast('error', 'Couldn’t keep', errorMessage(err));
+		}
+		invalidateAll();
+	}
+
+	async function removeMany(items: Item[]) {
+		if (!window.confirm(`Delete ${items.length} ${items.length === 1 ? 'item' : 'items'}? This can’t be undone.`)) return;
+		try {
+			for (const i of items) await api.del(`/api/items/${i.code}`);
+			selected.clear();
+		} catch (err) {
+			toast('error', 'Couldn’t delete', errorMessage(err));
+		}
+		invalidateAll();
+	}
+
 	const ICONS = { image: FileImage, video: FileVideo, audio: FileAudio, archive: FileArchive, text: FileCode, other: FileIcon };
 	// Burn items can't be fetched without using them up, so they never get a thumbnail.
 	const thumb = (i: Item) => i.kind === 'file' && !i.burn && !i.encrypted && mediaKind(i.mime) === 'image' && canPreview(i.mime);
@@ -190,7 +233,9 @@
 		if (!isFileDrag(e) || !data.authed) return;
 		e.preventDefault();
 		dragging = 0;
-		addFiles(e.dataTransfer?.files);
+		const { files, folders } = droppedFiles(e.dataTransfer);
+		if (folders.length) toast('error', 'Can’t share a folder', folderMessage(folders));
+		addFiles(files);
 	}}
 />
 
@@ -389,9 +434,36 @@
 			</div>
 		{:else}
 			<div class="card divide-y divide-border overflow-hidden">
+				<div class="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-2 bg-surface px-4 py-2">
+					<input type="checkbox" class="size-4 accent-[var(--primary)]" checked={allShown} onchange={toggleAll} aria-label="Select all shown" />
+					{#if selected.size}
+						<span class="text-xs font-medium">{selected.size} selected</span>
+						<button class="text-xs text-muted-foreground hover:text-foreground" onclick={() => selected.clear()}>Clear</button>
+						<div class="ml-auto flex flex-wrap items-center gap-2">
+							{#if pickedBurn.length}
+								<a class="btn btn-secondary btn-sm opacity-50" aria-disabled="true" title="Items deleted after first open can only be downloaded on their own. Untick them to download the rest." href={null}><Download />Download</a>
+							{:else}
+								<a class="btn btn-secondary btn-sm" href={downloadUrl} download title="Download as one .tar.gz"><Download />Download</a>
+							{/if}
+							{#if picked.some((i) => i.expiresAt)}
+								<button class="btn btn-secondary btn-sm" onclick={() => keep(picked)} title="Cancel the expiry so they stay"><Forever />Keep</button>
+							{/if}
+							<button class="btn btn-danger-outline btn-sm" onclick={() => removeMany(picked)}><Trash2 />Delete</button>
+						</div>
+					{:else}
+						<span class="text-xs text-muted-foreground">Select to download, keep or delete several at once</span>
+					{/if}
+				</div>
 				{#each shown as item (item.code)}
 					{@const Icon = item.kind === 'paste' ? FileText : ICONS[mediaKind(item.mime)]}
-					<div class="group flex items-center gap-3 px-4 py-2.5 hover:bg-surface">
+					<div class="group flex items-center gap-3 px-4 py-2.5 hover:bg-surface {selected.has(item.code) ? 'bg-primary-soft/50' : ''}">
+						<input
+							type="checkbox"
+							class="size-4 shrink-0 accent-[var(--primary)]"
+							checked={selected.has(item.code)}
+							onchange={(e) => (e.currentTarget.checked ? selected.add(item.code) : selected.delete(item.code))}
+							aria-label="Select {item.name || 'Untitled paste'}"
+						/>
 						<a href="/{item.kind}/{item.code}" class="grid size-10 shrink-0 place-items-center overflow-hidden rounded-lg bg-muted text-muted-foreground [&_svg]:size-4" tabindex="-1">
 							{#if thumb(item)}
 								<img src="/file/{item.code}/download?inline" alt="" loading="lazy" class="size-full object-cover" />
@@ -408,9 +480,18 @@
 						</a>
 						{#if item.encrypted}<span class="badge badge-primary" title="Encrypted with a password"><Lock />Encrypted</span>{/if}
 						{#if item.burn}<span class="badge badge-warning" title="Deleted after first open"><Flame />Once</span>{/if}
-						<span class="hidden w-28 text-right text-xs text-muted-foreground sm:block">
-							{item.expiresAt ? `expires ${relativeTime(item.expiresAt)}` : 'never expires'}
-						</span>
+						{#if item.expiresAt}
+							<button
+								class="hidden w-28 justify-end text-right text-xs text-muted-foreground hover:text-primary sm:flex"
+								onclick={() => keep([item])}
+								title="Keep: cancel the expiry so it stays"
+							>
+								<span class="group-hover:hidden">expires {relativeTime(item.expiresAt)}</span>
+								<span class="hidden items-center gap-1 group-hover:inline-flex"><Forever class="size-3" />Keep</span>
+							</button>
+						{:else}
+							<span class="hidden w-28 text-right text-xs text-muted-foreground sm:block">never expires</span>
+						{/if}
 						<button
 							class="btn btn-ghost btn-icon btn-sm"
 							onclick={() => copy(`${page.data.origin}/${item.kind}/${item.code}`, 'Link copied')}

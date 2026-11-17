@@ -176,12 +176,16 @@ export function touchCollection(code: string | null | undefined) {
 }
 
 /** Renames an item, moves it (path, mode) or replaces a paste's text. */
-export function updateItem(code: string, changes: { name?: string; path?: string | null; mode?: string | null; content?: string }): Item | null {
+export function updateItem(
+	code: string,
+	changes: { name?: string; path?: string | null; mode?: string | null; content?: string; expiresAt?: number | null }
+): Item | null {
 	const item = getItem(code);
 	if (!item) return null;
 	if (changes.name !== undefined) db.prepare('UPDATE items SET name = ? WHERE code = ?').run(item.kind === 'file' ? cleanName(changes.name) : changes.name.slice(0, 200), code);
 	if (changes.path !== undefined) db.prepare('UPDATE items SET path = ? WHERE code = ?').run(changes.path, code);
 	if (changes.mode !== undefined) db.prepare('UPDATE items SET mode = ? WHERE code = ?').run(changes.mode, code);
+	if (changes.expiresAt !== undefined) db.prepare('UPDATE items SET expires_at = ? WHERE code = ?').run(changes.expiresAt, code);
 	if (changes.content !== undefined && item.kind === 'paste') {
 		db.prepare('UPDATE items SET content = ?, size = ? WHERE code = ?').run(changes.content, Buffer.byteLength(changes.content), code);
 	}

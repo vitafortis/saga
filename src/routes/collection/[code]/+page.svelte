@@ -23,7 +23,8 @@
 	import { page } from '$app/state';
 	import PasswordFields, { passwordProblem } from '#lib/components/PasswordFields.svelte';
 	import Qr from '#lib/components/Qr.svelte';
-	import { api, errorMessage, uploadFile } from '#lib/client/api.ts';
+	import { api, errorMessage, readBytes, uploadFile } from '#lib/client/api.ts';
+	import { droppedFiles, folderMessage } from '#lib/client/files.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
 	import { encrypt, encryptText } from '#lib/crypto.ts';
 	import { formatBytes, groupCode, relativeTime } from '#lib/format.ts';
@@ -141,14 +142,14 @@
 	// Uploads: from the button or dropped anywhere on the page.
 	let uploading = $state<{ name: string; progress: number } | null>(null);
 	let dragging = $state(0);
-	async function upload(list: FileList | null | undefined) {
+	async function upload(list: FileList | File[] | null | undefined) {
 		if (!list?.length || !authed) return;
 		if (lockProblem) return toast('error', 'Check the password', lockProblem);
 		try {
 			for (const file of Array.from(list)) {
 				uploading = { name: file.name, progress: 0 };
 				const q = new URLSearchParams({ name: file.name, encrypted: locked ? '1' : '0' });
-				const body = locked ? new File([await encrypt(new Uint8Array(await file.arrayBuffer()), password)], file.name, { type: file.type }) : file;
+				const body = locked ? new File([await encrypt(await readBytes(file), password)], file.name, { type: file.type }) : file;
 				await uploadFile(body, `/api/collections/${c.code}/items?${q}`, (f) => uploading && (uploading.progress = f)).done;
 			}
 			toast('success', list.length === 1 ? 'File added' : `${list.length} files added`, 'Set a target path to include it in the install script.');
@@ -171,7 +172,9 @@
 		if (!isFileDrag(e)) return;
 		e.preventDefault();
 		dragging = 0;
-		upload(e.dataTransfer?.files);
+		const { files, folders } = droppedFiles(e.dataTransfer);
+		if (folders.length) toast('error', 'Can’t add a folder', folderMessage(folders));
+		upload(files);
 	}}
 />
 

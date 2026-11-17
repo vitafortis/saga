@@ -2,6 +2,7 @@
 	import { Download, Flame, Lock, LockOpen } from '@lucide/svelte';
 	import ItemHeader from '#lib/components/ItemHeader.svelte';
 	import Unlock from '#lib/components/Unlock.svelte';
+	import { statusMessage, UNREACHABLE } from '#lib/client/api.ts';
 	import { saveBytes } from '#lib/client/files.ts';
 	import { decrypt } from '#lib/crypto.ts';
 	import { formatBytes } from '#lib/format.ts';
@@ -16,8 +17,10 @@
 	let decrypted = $state(false);
 	async function unlock(password: string) {
 		if (!cipher) {
-			const res = await fetch(`/file/${data.item.code}/download`, { method: data.item.burn ? 'POST' : 'GET' });
-			if (!res.ok) throw new Error(`Download failed (${res.status})`);
+			const res = await fetch(`/file/${data.item.code}/download`, { method: data.item.burn ? 'POST' : 'GET' }).catch(() => {
+				throw new Error(UNREACHABLE);
+			});
+			if (!res.ok) throw new Error(statusMessage(res.status));
 			cipher = new Uint8Array(await res.arrayBuffer());
 			burned = data.item.burn;
 		}

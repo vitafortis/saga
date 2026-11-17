@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { ChevronLeft, Clock, Eye, File as FileIcon, FileText, Flame, FolderOpen, HardDriveDownload, Link, LoaderCircle, Lock, QrCode, Trash2 } from '@lucide/svelte';
+	import { ChevronLeft, Clock, Infinity as Forever, Eye, File as FileIcon, FileText, Flame, FolderOpen, HardDriveDownload, Link, LoaderCircle, Lock, QrCode, Trash2 } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 	import { slide } from 'svelte/transition';
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { api, errorMessage } from '#lib/client/api.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
@@ -25,6 +25,16 @@
 			toast('error', 'Couldn’t save', errorMessage(err));
 		}
 		saving = false;
+	}
+
+	async function keep() {
+		try {
+			await api.patch(`/api/items/${item.code}`, { expiry: 'never' });
+			toast('success', 'Kept', 'It won’t expire now.');
+			invalidateAll();
+		} catch (err) {
+			toast('error', 'Couldn’t keep', errorMessage(err));
+		}
 	}
 
 	async function remove() {
@@ -55,6 +65,9 @@
 				<span>·</span><span>{formatBytes(item.size)}</span>
 				<span>·</span><span title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}</span>
 				<span class="inline-flex items-center gap-1"><Clock class="size-3" />{item.expiresAt ? `expires ${relativeTime(item.expiresAt)}` : 'never expires'}</span>
+				{#if item.expiresAt && page.data.authed}
+					<button class="inline-flex items-center gap-1 text-primary hover:underline" onclick={keep} title="Cancel the expiry so it stays"><Forever class="size-3" />Keep</button>
+				{/if}
 				{#if item.views}<span class="inline-flex items-center gap-1"><Eye class="size-3" />{item.views}</span>{/if}
 				{#if item.encrypted}<span class="badge badge-primary"><Lock />Encrypted</span>{/if}
 				{#if item.burn}<span class="badge badge-warning"><Flame />Deleted after first open</span>{/if}
