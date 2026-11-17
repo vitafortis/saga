@@ -28,3 +28,5 @@ export class Limiter {
 export const loginLimiter = new Limiter(10, 15 * 60_000);
 /** Codes that don't exist: stops anyone walking the code space. */
 export const missLimiter = new Limiter(30, 10 * 60_000);
+/** Wrong API keys on /api/v1. */
+export const keyLimiter = new Limiter(20, 15 * 60_000);

@@ -6,9 +6,10 @@
 #   sagacp ./configs/              share a folder as .tar.gz
 #   journalctl -n 200 | sagacp     share text from a pipe
 #   sagacp 12345678                fetch: files and collections are saved here, text goes to stdout
+#   sagacp --install 12345678      install a collection's files (--dry-run to preview, --root for /etc)
 #
 # Options: -e/--expire 10m|1h|1d|7d|30d|never  -1/--once  -k/--keep  -n/--name NAME  -q/--quiet  --no-copy
-# Token (when Saga has a password): SAGA_TOKEN, or the first line of ~/.config/saga/token
+# API key (Saga > Settings > API keys): SAGA_TOKEN, or the first line of ~/.config/saga/token
 set -eu
 
 SAGA_URL=${SAGA_URL:-'__SAGA_URL__'}
@@ -16,14 +17,14 @@ SAGA_URL=${SAGA_URL%/}
 config="${XDG_CONFIG_HOME:-$HOME/.config}/saga/token"
 token=${SAGA_TOKEN:-}
 if [ -z "$token" ] && [ -r "$config" ]; then token=$(head -n 1 "$config"); fi
-# One header either way, so curl never gets an empty argument.
-auth="X-Saga-Client: sagacp"
-[ -n "$token" ] && auth="Authorization: Bearer $token"
+auth="Authorization: Bearer $token"
+# Everything goes through /api/v1, the part of Saga a proxy lets through on an API key alone.
+API="$SAGA_URL/api/v1"
 
-expiry='' burn='' name='' quiet=0 copy=1
+expiry='' burn='' name='' quiet=0 copy=1 install='' dry=0 root=0
 
 usage() {
-	sed -n '2,11s/^# \{0,1\}//p' "$0" 2>/dev/null || echo "usage: sagacp [options] [file|dir|code ...]"
+	sed -n '2,12s/^# \{0,1\}//p' "$0" 2>/dev/null || echo "usage: sagacp [options] [file|dir|code ...]"
 }
 die() { echo "sagacp: $*" >&2; exit 1; }
 
@@ -35,6 +36,9 @@ while [ $# -gt 0 ]; do
 		-n | --name) [ $# -ge 2 ] || die "$1 needs a value"; name=$2; shift 2 ;;
 		-q | --quiet) quiet=1; shift ;;
 		--no-copy) copy=0; shift ;;
+		-i | --install) [ $# -ge 2 ] || die "$1 needs a collection code"; install=$2; shift 2 ;;
+		--dry-run) dry=1; shift ;;
+		--root) root=1; shift ;;
 		-h | --help) usage; exit 0 ;;
 		--) shift; break ;;
 		-) break ;;
@@ -44,6 +48,7 @@ while [ $# -gt 0 ]; do
 done
 
 command -v curl >/dev/null 2>&1 || die "curl is required"
+[ -n "$token" ] || die "no API key: create one in Saga > Settings > API keys, then put it in $config (or SAGA_TOKEN)"
 case $expiry in '' | 10m | 1h | 1d | 7d | 30d | never) ;; *) die "--expire takes 10m, 1h, 1d, 7d, 30d or never" ;; esac
 
 # Percent-encodes every byte: always valid in a URL, and needs only od.
@@ -64,7 +69,7 @@ request() {
 	body=$(printf %s "$out" | sed '$d')
 	case $status in
 		2??) printf '%s\n' "$body" ;;
-		401) die "not signed in: set SAGA_TOKEN (Saga's SAGA_API_TOKEN), or put it in $config" ;;
+		401) die "API key not accepted: check $config (or SAGA_TOKEN), or make a new one in Settings" ;;
 		*)
 			msg=$(printf %s "$body" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
 			die "${msg:-${body:-HTTP $status}}" ;;
@@ -84,7 +89,7 @@ mimetype() { file -b --mime-type "$1" 2>/dev/null || echo application/octet-stre
 share_file() {
 	f=$1
 	n=${name:-$(basename "$f")}
-	url=$(request -T "$f" -H "Content-Type: $(mimetype "$f")" "$SAGA_URL/api/files/$(urlencode "$n")?$(query)")
+	url=$(request -T "$f" -H "Content-Type: $(mimetype "$f")" "$API/files/$(urlencode "$n")?$(query)")
 	shared "$n" "$url"
 }
 
@@ -92,12 +97,12 @@ share_dir() {
 	d=${1%/}
 	n=${name:-$(basename "$d").tar.gz}
 	command -v tar >/dev/null 2>&1 || die "tar is required to share a folder"
-	url=$(tar -czf - -C "$(dirname "$d")" "$(basename "$d")" | request -T - -H 'Content-Type: application/gzip' "$SAGA_URL/api/files/$(urlencode "$n")?$(query)")
+	url=$(tar -czf - -C "$(dirname "$d")" "$(basename "$d")" | request -T - -H 'Content-Type: application/gzip' "$API/files/$(urlencode "$n")?$(query)")
 	shared "$n" "$url"
 }
 
 share_stdin() {
-	url=$(request --data-binary @- -H 'Content-Type: text/plain' "$SAGA_URL/api/pastes?$(query)")
+	url=$(request --data-binary @- -H 'Content-Type: text/plain' "$API/pastes?$(query)")
 	shared "${name:-text}" "$url"
 }
 
@@ -116,25 +121,37 @@ download() { # download <url> [curl options...]
 	[ "$quiet" = 1 ] && echo "$target" || echo "saved $target" >&2
 }
 
+# What a code points to: paste, file or collection (and, for items, whether it burns).
+resolve() { request "$API/resolve/$1"; }
+
 fetch() { # fetch <code>
 	code=$(printf %s "$1" | tr -d ' -')
-	where=$(curl -sS -o /dev/null -w '%{redirect_url}' -H "$auth" "$SAGA_URL/$code") || die "can't reach $SAGA_URL"
-	case $where in
-		*/paste/*)
+	info=$(resolve "$code")
+	case $info in
+		*'"kind":"paste"'*)
 			# Delete-after-first-open items only open with a POST.
-			curl -sSf -H "$auth" "$SAGA_URL/paste/$code/raw" 2>/dev/null || request -X POST "$SAGA_URL/paste/$code/raw" ;;
-		*/file/*)
-			# A plain GET is refused (403) for delete-after-first-open files; those need a POST.
-			if [ "$(curl -sS -o /dev/null -w '%{http_code}' -I -H "$auth" "$SAGA_URL/file/$code/download")" = 403 ]; then
-				download "$SAGA_URL/file/$code/download" -X POST || die "couldn't download $code"
-			else
-				download "$SAGA_URL/file/$code/download" || die "couldn't download $code"
-			fi ;;
-		*/collection/*)
-			download "$SAGA_URL/collection/$code/archive" || die "couldn't download collection $code"
-			[ "$quiet" = 1 ] || echo "to install it instead: curl -fsSL $SAGA_URL/collection/$code/install.sh | sh" >&2 ;;
+			case $info in *'"burn":true'*) method=POST ;; *) method=GET ;; esac
+			# Straight to stdout (not via request), so the text comes out byte for byte.
+			curl -sSf -H "$auth" -X "$method" "$API/paste/$code/raw" || die "couldn't fetch $code" ;;
+		*'"kind":"file"'*)
+			case $info in *'"burn":true'*) set -- -X POST ;; *) set -- ;; esac
+			download "$API/file/$code/download" "$@" || die "couldn't download $code" ;;
+		*'"kind":"collection"'*)
+			download "$API/collections/$code/archive" || die "couldn't download collection $code"
+			[ "$quiet" = 1 ] || echo "to install its files instead: sagacp --install $code" >&2 ;;
 		*) die "no item with code $code" ;;
 	esac
+}
+
+install_collection() { # install_collection <code>
+	code=$(printf %s "$1" | tr -d ' -')
+	script=$(mktemp)
+	curl -sSf -H "$auth" -o "$script" "$API/collections/$code/install.sh" || { rm -f "$script"; die "couldn't get collection $code"; }
+	set -- "$script"
+	[ "$dry" = 1 ] && set -- "$script" --dry-run
+	# Fetched as you (with your key), then run as root only if asked.
+	if [ "$root" = 1 ]; then sudo sh "$@"; else sh "$@"; fi || { rm -f "$script"; exit 1; }
+	rm -f "$script"
 }
 
 copy_link() {
@@ -147,7 +164,10 @@ copy_link() {
 	done
 }
 
-if [ $# -eq 0 ] || [ "$1" = - ]; then
+if [ -n "$install" ]; then
+	install_collection "$install"
+	exit 0
+elif [ $# -eq 0 ] || [ "$1" = - ]; then
 	[ -t 0 ] && { usage >&2; exit 2; }
 	share_stdin
 else

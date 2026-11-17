@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Cookies } from '@sveltejs/kit';
-import { API_TOKEN, PASSWORD, SECRET } from './config.ts';
+import { bearer, checkKey } from './api-keys.ts';
+import { PASSWORD, SECRET } from './config.ts';
 
 export const COOKIE = 'saga_session';
 const MAX_AGE = 30 * 86_400; // seconds
@@ -34,8 +35,8 @@ export function issueSession(cookies: Cookies, secure: boolean) {
 
 export function isAuthed(cookies: Cookies, headers: Headers): boolean {
 	if (!passwordRequired()) return true;
-	const bearer = headers.get('authorization')?.match(/^Bearer\s+(.+)$/i)?.[1];
-	if (bearer && API_TOKEN && safeEqual(sign(`pw:${bearer}`), sign(`pw:${API_TOKEN}`))) return true;
+	const key = bearer(headers);
+	if (key && checkKey(key)) return true;
 	const value = cookies.get(COOKIE);
 	if (!value) return false;
 	const [exp, mac] = value.split('.');

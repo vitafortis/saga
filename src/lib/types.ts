@@ -54,3 +54,13 @@ export type Settings = {
 export const DEFAULT_SETTINGS: Settings = { defaultExpiry: '1d', defaultBurn: false };
 
 export const isExpiry = (v: unknown): v is Expiry => EXPIRY_OPTIONS.some((o) => o.value === v);
+
+/** An API key as listed; the secret itself is shown once, when created. */
+export type ApiKey = {
+	id: string;
+	name: string;
+	/** First characters of the key, to tell keys apart. */
+	prefix: string;
+	createdAt: number;
+	lastUsedAt: number | null;
+};

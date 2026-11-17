@@ -5,7 +5,7 @@ import type { RequestHandler } from './$types';
 
 export const GET: RequestHandler = async (event) => {
 	const collection = findCollection(event, event.params.code);
-	const url = `${event.locals.origin}/collection/${collection.code}/install.sh`;
+	const url = `${event.locals.origin}${event.url.pathname}`;
 	return new Response(await installScript(collection, collectionItems(collection.code), url), {
 		headers: {
 			'content-type': 'text/x-shellscript; charset=utf-8',

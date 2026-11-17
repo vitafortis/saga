@@ -35,9 +35,11 @@
 
 	// Install command: run, preview, or as root (for /etc and other system paths).
 	let mode = $state<'run' | 'dry' | 'root'>('run');
-	const script = $derived(`${url}/install.sh`);
-	const command = $derived(
-		mode === 'dry' ? `curl -fsSL ${script} | sh -s -- --dry-run` : mode === 'root' ? `curl -fsSL ${script} | sudo sh` : `curl -fsSL ${script} | sh`
+	// Through /api/v1 with an API key, so it works on machines outside the SSO (see Settings).
+	const script = $derived(`${page.data.origin}/api/v1/collections/${c.code}/install.sh`);
+	const command = $derived(`sagacp --install ${c.code}${mode === 'dry' ? ' --dry-run' : mode === 'root' ? ' --root' : ''}`);
+	const curlCommand = $derived(
+		`curl -fsSL -H "Authorization: Bearer $(cat ~/.config/saga/token)" ${script} | ${mode === 'dry' ? 'sh -s -- --dry-run' : mode === 'root' ? 'sudo sh' : 'sh'}`
 	);
 	const placed = $derived(data.items.filter((i) => i.path));
 	const needsRoot = $derived(placed.some((i) => !i.path!.startsWith('~/')));
@@ -224,6 +226,11 @@
 		<code class="min-w-0 flex-1 overflow-x-auto rounded-md px-1 py-1 font-mono text-xs whitespace-nowrap">{command}</code>
 		<button class="btn btn-primary btn-sm shrink-0" onclick={() => copy(command, 'Command copied')}><Copy />Copy</button>
 	</div>
+	<div class="flex items-center gap-2 border-t border-border bg-surface px-3 py-2">
+		<span class="shrink-0 text-[0.6875rem] text-muted-foreground">No sagacp?</span>
+		<code class="min-w-0 flex-1 overflow-x-auto font-mono text-[0.6875rem] whitespace-nowrap text-muted-foreground">{curlCommand}</code>
+		<button class="btn btn-ghost btn-icon btn-sm shrink-0" onclick={() => copy(curlCommand, 'Command copied')} aria-label="Copy curl command"><Copy /></button>
+	</div>
 	<p class="border-t border-border px-4 py-2 text-[0.6875rem] text-muted-foreground">
 		{#if placed.length === 0}
 			Nothing to install yet: give files a target path, like <span class="font-mono">~/.bashrc</span> or <span class="font-mono">/etc/hosts</span>.
@@ -231,7 +238,8 @@
 			Writes {placed.length} {placed.length === 1 ? 'file' : 'files'}{data.items.length > placed.length ? ` (${data.items.length - placed.length} without a path are skipped)` : ''}. Changed files are kept as
 			<span class="font-mono">.saga-bak</span>.
 			{#if needsRoot}System paths need <b class="font-medium text-foreground">As root</b>{#if hasHome}, where <span class="font-mono">~</span> is root's home{/if}.{/if}
-			<a class="text-primary hover:underline" href={script} target="_blank" rel="noreferrer">View script</a>
+			Needs an API key (Settings).
+			<a class="text-primary hover:underline" href="/collection/{c.code}/install.sh" target="_blank" rel="noreferrer">View script</a>
 		{/if}
 	</p>
 </div>

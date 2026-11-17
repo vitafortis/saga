@@ -45,3 +45,15 @@ for (const [name, type] of [
 	if (!columns.has(name)) db.exec(`ALTER TABLE items ADD COLUMN ${name} ${type}`);
 }
 db.exec('CREATE INDEX IF NOT EXISTS items_collection ON items (collection) WHERE collection IS NOT NULL');
+
+// API keys for /api/v1 (scripts, sagacp). Only a SHA-256 of each key is kept.
+db.exec(`
+	CREATE TABLE IF NOT EXISTS api_keys (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		hash TEXT NOT NULL UNIQUE,
+		prefix TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		last_used_at INTEGER
+	);
+`);

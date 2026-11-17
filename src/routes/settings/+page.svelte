@@ -4,6 +4,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { api, errorMessage } from '#lib/client/api.ts';
 	import { toast } from '#lib/client/state.svelte.ts';
+	import ApiKeys from '#lib/components/ApiKeys.svelte';
 	import { formatBytes } from '#lib/format.ts';
 	import { EXPIRY_OPTIONS, type Settings } from '#lib/types.ts';
 	import type { PageProps } from './$types';
@@ -77,6 +78,8 @@
 		</button>
 	</div>
 </form>
+
+<ApiKeys keys={data.keys} />
 
 <section class="mt-8">
 	<h2 class="mb-3 text-sm font-semibold tracking-tight">Storage</h2>

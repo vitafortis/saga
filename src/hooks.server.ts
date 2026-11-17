@@ -1,6 +1,8 @@
 import { json } from '@sveltejs/kit';
 import type { Handle, ServerInit } from '@sveltejs/kit/hooks';
+import { bearer, checkKey } from '#lib/server/api-keys.ts';
 import { isAuthed } from '#lib/server/auth.ts';
+import { keyLimiter } from '#lib/server/limits.ts';
 import { sweep } from '#lib/server/store.ts';
 
 export const init: ServerInit = () => {
@@ -43,11 +45,25 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 	event.locals.origin = visibleOrigin(event.url, event.request.headers);
 	event.locals.secure = event.locals.origin.startsWith('https:');
-	event.locals.authed = isAuthed(event.cookies, event.request.headers);
 	try {
 		event.locals.ip = event.getClientAddress();
 	} catch {
 		event.locals.ip = 'unknown';
+	}
+
+	// /api/v1 is for scripts and sagacp, and is what a reverse proxy (Pangolin) lets through
+	// without SSO. So it always takes an API key, whether or not Saga has a password, and
+	// nothing else: no session cookie, no "behind SSO, everyone's signed in".
+	if (event.url.pathname.startsWith('/api/v1/') && event.url.pathname !== '/api/v1/health') {
+		if (keyLimiter.blocked(event.locals.ip)) return json({ message: 'Too many bad API keys. Try again later.' }, { status: 429 });
+		const key = bearer(event.request.headers);
+		if (!key || !checkKey(key)) {
+			keyLimiter.hit(event.locals.ip);
+			return json({ message: 'API key required: Authorization: Bearer <key> (create one in Settings)' }, { status: 401, headers: { 'www-authenticate': 'Bearer' } });
+		}
+		event.locals.authed = true;
+	} else {
+		event.locals.authed = isAuthed(event.cookies, event.request.headers);
 	}
 
 	const response = await resolve(event);

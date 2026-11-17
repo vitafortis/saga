@@ -18,7 +18,7 @@ services:
       # sign-in and everyone who gets past the IdP can share. Without SSO, set it: it's needed
       # to share anything (opening a code never needs it).
       SAGA_PASSWORD: ${SAGA_PASSWORD:-}
-      # Optional, with SAGA_PASSWORD: for scripts, `Authorization: Bearer <token>`.
+      # Optional: an extra API key from the environment (keys made in Settings are easier).
       SAGA_API_TOKEN: ${SAGA_API_TOKEN:-}
       # Limits (MB).
       SAGA_MAX_FILE_MB: ${SAGA_MAX_FILE_MB:-1024}
