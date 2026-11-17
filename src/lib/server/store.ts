@@ -8,6 +8,7 @@ import { BLOB_DIR, CODE_LENGTH, MAX_FILE_BYTES } from './config.ts';
 import { db } from './db.ts';
 import { EXPIRY_OPTIONS, isExpiry, type Expiry, type Item } from '#lib/types.ts';
 import { getSettings } from './settings.ts';
+import { TEXT_PREFIX } from '#lib/crypto.ts';
 
 type Row = {
 	code: string;
@@ -22,9 +23,10 @@ type Row = {
 	collection: string | null;
 	path: string | null;
 	mode: string | null;
+	encrypted: number;
 };
 
-const COLUMNS = 'code, kind, name, mime, size, created_at, expires_at, burn, views, collection, path, mode';
+const COLUMNS = 'code, kind, name, mime, size, created_at, expires_at, burn, views, collection, path, mode, encrypted';
 
 const toItem = (r: Row): Item => ({
 	code: r.code,
@@ -38,10 +40,19 @@ const toItem = (r: Row): Item => ({
 	views: r.views,
 	collection: r.collection,
 	path: r.path,
-	mode: r.mode
+	mode: r.mode,
+	encrypted: !!r.encrypted
 });
 
 export class TooLargeError extends Error {}
+export class NotEncryptedError extends Error {
+	constructor() {
+		super('Marked encrypted, but this isn’t Saga/openssl ciphertext');
+	}
+}
+
+/** An encrypted paste is single-line base64 of openssl's format. */
+export const isEncryptedText = (s: string) => s.startsWith(TEXT_PREFIX) && /^[A-Za-z0-9+/]+={0,2}$/.test(s) && s.length % 4 === 0;
 
 export const isCode = (s: string) => /^\d{6,12}$/.test(s);
 
@@ -75,6 +86,8 @@ type Options = {
 	collection?: string;
 	path?: string | null;
 	mode?: string | null;
+	/** The client encrypted it (see crypto.ts); checked to really be ciphertext. */
+	encrypted?: boolean;
 };
 
 /** Target paths for the install script: absolute or under ~/, no `..`, printable. */
@@ -96,17 +109,22 @@ export function cleanMode(mode: string | null | undefined): string | null | Erro
 
 /** Columns shared by both kinds of item, with collection items pinned to never expire or burn. */
 function common(opts: Options, now: number) {
-	if (opts.collection) return { expires: null, burn: 0, collection: opts.collection, path: opts.path ?? null, mode: opts.mode ?? null };
-	return { expires: expiresAt(opts.expiry, now), burn: opts.burn ? 1 : 0, collection: null, path: null, mode: null };
+	const encrypted = opts.encrypted ? 1 : 0;
+	if (opts.collection) return { expires: null, burn: 0, collection: opts.collection, path: opts.path ?? null, mode: opts.mode ?? null, encrypted };
+	return { expires: expiresAt(opts.expiry, now), burn: opts.burn ? 1 : 0, collection: null, path: null, mode: null, encrypted };
 }
 
 export function createPaste(content: string, title: string, opts: Options): Item {
+	if (opts.encrypted) {
+		content = content.trim();
+		if (!isEncryptedText(content)) throw new NotEncryptedError();
+	}
 	const code = newCode();
 	const now = Date.now();
 	const c = common(opts, now);
 	db.prepare(
-		'INSERT INTO items (code, kind, name, mime, size, content, created_at, expires_at, burn, collection, path, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-	).run(code, 'paste', title.slice(0, 200), 'text/plain', Buffer.byteLength(content), content, now, c.expires, c.burn, c.collection, c.path, c.mode);
+		'INSERT INTO items (code, kind, name, mime, size, content, created_at, expires_at, burn, collection, path, mode, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+	).run(code, 'paste', title.slice(0, 200), 'text/plain', Buffer.byteLength(content), content, now, c.expires, c.burn, c.collection, c.path, c.mode, c.encrypted);
 	touchCollection(opts.collection);
 	return getItem(code)!;
 }
@@ -116,11 +134,18 @@ export async function createFile(body: ReadableStream<Uint8Array>, name: string,
 	const code = newCode();
 	const tmp = join(BLOB_DIR, `.${code}.part`);
 	let size = 0;
+	let head = Buffer.alloc(0);
 	const limit = new Transform({
 		transform(chunk: Buffer, _enc, cb) {
 			size += chunk.length;
+			if (opts.encrypted && head.length < 8) head = Buffer.concat([head, chunk]).subarray(0, 8);
 			if (size > MAX_FILE_BYTES) cb(new TooLargeError(`Files can be up to ${Math.round(MAX_FILE_BYTES / 1048576)} MB`));
+			// Not ciphertext: read to the end and refuse then, so the client gets the reason (not a dropped connection).
+			else if (opts.encrypted && head.length === 8 && head.toString('latin1') !== 'Salted__') cb();
 			else cb(null, chunk);
+		},
+		flush(cb) {
+			cb(opts.encrypted && head.toString('latin1') !== 'Salted__' ? new NotEncryptedError() : null);
 		}
 	});
 	const out = createWriteStream(tmp, { mode: 0o600 });
@@ -130,8 +155,8 @@ export async function createFile(body: ReadableStream<Uint8Array>, name: string,
 		const now = Date.now();
 		const c = common(opts, now);
 		db.prepare(
-			'INSERT INTO items (code, kind, name, mime, size, created_at, expires_at, burn, collection, path, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-		).run(code, 'file', cleanName(name), mime || 'application/octet-stream', size, now, c.expires, c.burn, c.collection, c.path, c.mode);
+			'INSERT INTO items (code, kind, name, mime, size, created_at, expires_at, burn, collection, path, mode, encrypted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+		).run(code, 'file', cleanName(name), mime || 'application/octet-stream', size, now, c.expires, c.burn, c.collection, c.path, c.mode, c.encrypted);
 		await rename(tmp, blobPath(code)).catch((err) => {
 			db.prepare('DELETE FROM items WHERE code = ?').run(code);
 			throw err;

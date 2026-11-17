@@ -23,11 +23,12 @@ const BLOB_HEADERS = {
  * `burn`: the caller has already claimed the item; the blob is removed once sent.
  */
 export function sendFile(item: Item, request: Request, opts: { inline: boolean; burn?: boolean }): Response {
-	const inline = opts.inline && canPreview(item.mime);
+	const inline = opts.inline && !item.encrypted && canPreview(item.mime);
 	const headers: Record<string, string> = {
 		...BLOB_HEADERS,
-		'content-type': inline ? item.mime : item.mime.startsWith('text/') ? 'text/plain; charset=utf-8' : 'application/octet-stream',
-		'content-disposition': contentDisposition(inline ? 'inline' : 'attachment', item.name),
+		'content-type': inline ? item.mime : item.mime.startsWith('text/') && !item.encrypted ? 'text/plain; charset=utf-8' : 'application/octet-stream',
+		// Encrypted files download as name.enc: `openssl enc -d … -in name.enc -out name`.
+		'content-disposition': contentDisposition(inline ? 'inline' : 'attachment', item.encrypted ? `${item.name}.enc` : item.name),
 		'accept-ranges': opts.burn ? 'none' : 'bytes'
 	};
 	let start = 0;
@@ -67,5 +68,8 @@ export function sendText(text: string, name: string, download: boolean): Respons
 	});
 }
 
-/** File name for downloading a paste. */
-export const pasteFileName = (item: Item) => (item.name ? (/\.\w{1,8}$/.test(item.name) ? item.name : `${item.name}.txt`) : `${item.code}.txt`);
+/** File name for downloading a paste; encrypted ones are base64 (`openssl enc -d -a -A …`). */
+export function pasteFileName(item: Item): string {
+	const name = item.name ? (/\.\w{1,8}$/.test(item.name) ? item.name : `${item.name}.txt`) : `${item.code}.txt`;
+	return item.encrypted ? `${name}.b64.enc` : name;
+}

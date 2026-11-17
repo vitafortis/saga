@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronLeft, Clock, Eye, File as FileIcon, FileText, Flame, FolderOpen, Link, QrCode, Trash2 } from '@lucide/svelte';
+	import { ChevronLeft, Clock, Eye, File as FileIcon, FileText, Flame, FolderOpen, HardDriveDownload, Link, LoaderCircle, Lock, QrCode, Trash2 } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { goto } from '$app/navigation';
@@ -13,6 +13,19 @@
 	let { item, collection = null, actions }: { item: Item; collection?: Collection | null; actions?: Snippet } = $props();
 	let showQr = $state(false);
 	const url = $derived(`${page.data.origin}/${item.kind}/${item.code}`);
+
+	// A copy in the NAS folder (Settings → Backups); burn items aren't, as a copy would outlive their one open.
+	let saving = $state(false);
+	async function saveToNas() {
+		saving = true;
+		try {
+			const { path } = await api.post<{ path: string }>(`/api/items/${item.code}/save`);
+			toast('success', 'Saved to NAS', path);
+		} catch (err) {
+			toast('error', 'Couldn’t save', errorMessage(err));
+		}
+		saving = false;
+	}
 
 	async function remove() {
 		try {
@@ -43,6 +56,7 @@
 				<span>·</span><span title={new Date(item.createdAt).toLocaleString()}>{relativeTime(item.createdAt)}</span>
 				<span class="inline-flex items-center gap-1"><Clock class="size-3" />{item.expiresAt ? `expires ${relativeTime(item.expiresAt)}` : 'never expires'}</span>
 				{#if item.views}<span class="inline-flex items-center gap-1"><Eye class="size-3" />{item.views}</span>{/if}
+				{#if item.encrypted}<span class="badge badge-primary"><Lock />Encrypted</span>{/if}
 				{#if item.burn}<span class="badge badge-warning"><Flame />Deleted after first open</span>{/if}
 				{#if item.path}<span class="badge font-mono">{item.path}{item.mode ? ` · ${item.mode}` : ''}</span>{/if}
 			</p>
@@ -50,6 +64,11 @@
 	</div>
 	<div class="flex flex-wrap items-center gap-2">
 		{@render actions?.()}
+		{#if page.data.backups && page.data.authed && !item.burn}
+			<button class="btn btn-secondary btn-icon btn-sm" onclick={saveToNas} disabled={saving} aria-label="Save to NAS" title="Save a copy to the NAS">
+				{#if saving}<LoaderCircle class="animate-spin" />{:else}<HardDriveDownload />{/if}
+			</button>
+		{/if}
 		<button class="btn btn-secondary btn-sm" onclick={() => copy(url, 'Link copied')}><Link />Link</button>
 		<button class="btn btn-secondary btn-icon btn-sm {showQr ? 'bg-accent' : ''}" onclick={() => (showQr = !showQr)} aria-label="QR code" title="QR code"><QrCode /></button>
 		{#if page.data.authed}

@@ -13,6 +13,7 @@
 		FolderOpen,
 		FolderPlus,
 		LoaderCircle,
+		Lock,
 		LogIn,
 		Search,
 		Send,
@@ -24,9 +25,11 @@
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import CodeJump from '#lib/components/CodeJump.svelte';
+	import PasswordFields, { passwordProblem } from '#lib/components/PasswordFields.svelte';
 	import ShareResult from '#lib/components/ShareResult.svelte';
 	import { api, errorMessage, uploadFile } from '#lib/client/api.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
+	import { encrypt, encryptText } from '#lib/crypto.ts';
 	import { formatBytes, groupCode, relativeTime } from '#lib/format.ts';
 	import { canPreview, mediaKind } from '#lib/media.ts';
 	import { EXPIRY_OPTIONS, type Item } from '#lib/types.ts';
@@ -43,6 +46,10 @@
 	// Start from the saved defaults (Settings); later changes to them don't reset a draft.
 	let expiry = $state<string>(untrack(() => data.settings.defaultExpiry));
 	let burn = $state(untrack(() => data.settings.defaultBurn));
+	// End-to-end: encrypted here before upload (see crypto.ts).
+	let locked = $state(false);
+	let password = $state('');
+	let confirm = $state('');
 	let busy = $state(false);
 	let progress = $state(0);
 	let abort: (() => void) | null = null;
@@ -54,7 +61,9 @@
 		if (/Mac|iPhone|iPad/.test(navigator.userAgent)) mod = '⌘';
 	});
 
-	const canSubmit = $derived(!busy && (tab === 'text' ? content.trim() !== '' : files.length > 0));
+	const canSubmit = $derived(
+		!busy && (tab === 'text' ? content.trim() !== '' : files.length > 0) && (!locked || !passwordProblem(password, confirm))
+	);
 	const tooBig = $derived(files.filter((f) => f.size > data.maxFileBytes));
 
 	function reset() {
@@ -65,6 +74,8 @@
 		progress = 0;
 		expiry = data.settings.defaultExpiry;
 		burn = data.settings.defaultBurn;
+		locked = false;
+		password = confirm = '';
 	}
 
 	function addFiles(list: FileList | File[] | null | undefined) {
@@ -79,15 +90,18 @@
 		busy = true;
 		try {
 			if (tab === 'text') {
-				results = [await api.post<Shared>('/api/pastes', { content, title, expiry, burn })];
+				const text = locked ? await encryptText(content, password) : content;
+				results = [await api.post<Shared>('/api/pastes', { content: text, title, expiry, burn, encrypted: locked })];
 			} else {
 				if (tooBig.length) throw new Error(`${tooBig[0].name} is over ${formatBytes(data.maxFileBytes)}`);
 				const out: Shared[] = [];
 				const total = files.reduce((n, f) => n + f.size, 0) || 1;
 				let sent = 0;
 				for (const file of files) {
-					const q = new URLSearchParams({ name: file.name, expiry, burn: burn ? '1' : '0' });
-					const up = uploadFile<Shared>(file, `/api/files?${q}`, (f) => (progress = (sent + f * file.size) / total));
+					const q = new URLSearchParams({ name: file.name, expiry, burn: burn ? '1' : '0', encrypted: locked ? '1' : '0' });
+					// Held in memory to encrypt: fine for keys and documents, slow for huge videos.
+					const body = locked ? new File([await encrypt(new Uint8Array(await file.arrayBuffer()), password)], file.name, { type: file.type }) : file;
+					const up = uploadFile<Shared>(body, `/api/files?${q}`, (f) => (progress = (sent + f * file.size) / total));
 					abort = up.abort;
 					out.push(await up.done);
 					sent += file.size;
@@ -161,7 +175,7 @@
 	});
 	const ICONS = { image: FileImage, video: FileVideo, audio: FileAudio, archive: FileArchive, text: FileCode, other: FileIcon };
 	// Burn items can't be fetched without using them up, so they never get a thumbnail.
-	const thumb = (i: Item) => i.kind === 'file' && !i.burn && mediaKind(i.mime) === 'image' && canPreview(i.mime);
+	const thumb = (i: Item) => i.kind === 'file' && !i.burn && !i.encrypted && mediaKind(i.mime) === 'image' && canPreview(i.mime);
 </script>
 
 <svelte:head><title>Saga</title></svelte:head>
@@ -270,7 +284,10 @@
 				{/if}
 			</div>
 
-			<div class="flex flex-wrap items-center gap-x-4 gap-y-3 border-t border-border bg-surface px-4 py-3 sm:px-5">
+			{#if locked}
+				<div class="border-t border-border bg-surface px-4 pt-3 sm:px-5"><PasswordFields bind:password bind:confirm disabled={busy} /></div>
+			{/if}
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-3 bg-surface px-4 py-3 sm:px-5 {locked ? '' : 'border-t border-border'}">
 				<label class="flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
 					<Clock class="size-4" />Expires
 					<select class="input h-8 w-auto py-0 text-[0.8125rem]" bind:value={expiry}>
@@ -280,6 +297,10 @@
 				<label class="flex cursor-pointer items-center gap-2 text-[0.8125rem] text-muted-foreground select-none">
 					<input type="checkbox" class="size-4 accent-[var(--primary)]" bind:checked={burn} />
 					<Flame class="size-4 {burn ? 'text-warning' : ''}" />Delete after first open
+				</label>
+				<label class="flex cursor-pointer items-center gap-2 text-[0.8125rem] text-muted-foreground select-none">
+					<input type="checkbox" class="size-4 accent-[var(--primary)]" bind:checked={locked} />
+					<Lock class="size-4 {locked ? 'text-primary' : ''}" />Encrypt
 				</label>
 				<div class="flex-1"></div>
 				{#if busy && tab === 'file'}
@@ -385,6 +406,7 @@
 								{#if item.views}· {item.views} {item.views === 1 ? 'view' : 'views'}{/if}
 							</p>
 						</a>
+						{#if item.encrypted}<span class="badge badge-primary" title="Encrypted with a password"><Lock />Encrypted</span>{/if}
 						{#if item.burn}<span class="badge badge-warning" title="Deleted after first open"><Flame />Once</span>{/if}
 						<span class="hidden w-28 text-right text-xs text-muted-foreground sm:block">
 							{item.expiresAt ? `expires ${relativeTime(item.expiresAt)}` : 'never expires'}

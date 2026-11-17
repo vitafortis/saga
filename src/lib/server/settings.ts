@@ -26,6 +26,9 @@ export function saveSettings(input: Record<string, unknown>): string | null {
 	return null;
 }
 
+/** A yes/no query parameter: absent or `0`/`false`/`no`/`off` → false. */
+export const flag = (value: string | null) => value !== null && !/^(0|false|no|off)$/i.test(value);
+
 /** `burn` from a query string: absent → the default; `0`/`false`/`no` → off; anything else → on. */
 export function burnParam(value: string | null): boolean {
 	if (value === null) return getSettings().defaultBurn;

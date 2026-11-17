@@ -5,5 +5,5 @@ import type { PageServerLoad } from './$types';
 
 export const load: PageServerLoad = (event) => {
 	const item = findItem(event, event.params.code, 'file');
-	return { item, collection: item.collection ? getCollection(item.collection) : null, preview: !item.burn && canPreview(item.mime) ? item.mime.split('/')[0] : null };
+	return { item, collection: item.collection ? getCollection(item.collection) : null, preview: !item.burn && !item.encrypted && canPreview(item.mime) ? item.mime.split('/')[0] : null };
 };

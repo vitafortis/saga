@@ -5,6 +5,7 @@
 	import { api, errorMessage } from '#lib/client/api.ts';
 	import { toast } from '#lib/client/state.svelte.ts';
 	import ApiKeys from '#lib/components/ApiKeys.svelte';
+	import Backups from '#lib/components/Backups.svelte';
 	import { formatBytes } from '#lib/format.ts';
 	import { EXPIRY_OPTIONS, type Settings } from '#lib/types.ts';
 	import type { PageProps } from './$types';
@@ -80,6 +81,8 @@
 </form>
 
 <ApiKeys keys={data.keys} />
+
+<Backups status={data.backups} />
 
 <section class="mt-8">
 	<h2 class="mb-3 text-sm font-semibold tracking-tight">Storage</h2>

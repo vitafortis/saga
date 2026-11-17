@@ -29,9 +29,32 @@ services:
       # Real client IPs for rate limits (unknown-code lookups, sign-in attempts):
       # ADDRESS_HEADER: X-Forwarded-For
       # XFF_DEPTH: "1"
+      # Backups to a NAS: uncomment this, the /backups mount and one of the nas-backups
+      # volumes below. Snapshots every SAGA_BACKUP_HOURS, keeping SAGA_BACKUP_KEEP, plus
+      # "Save to NAS" on items and collections.
+      # SAGA_BACKUP_DIR: /backups
+      # SAGA_BACKUP_HOURS: "24"
+      # SAGA_BACKUP_KEEP: "14"
     volumes:
       # Database, uploaded files and the session key.
       - saga-data:/data
+      # - nas-backups:/backups
 
 volumes:
   saga-data:
+  # NAS share for backups, mounted by Docker itself (no mount on the host).
+  # The share must be writable by uid 1000 (the container's "node" user).
+  # NFS:
+  # nas-backups:
+  #   driver: local
+  #   driver_opts:
+  #     type: nfs
+  #     o: addr=nas.lan,rw,nfsvers=4
+  #     device: ":/volume1/backups/saga"
+  # SMB / CIFS:
+  # nas-backups:
+  #   driver: local
+  #   driver_opts:
+  #     type: cifs
+  #     o: addr=nas.lan,username=backup,password=${NAS_PASSWORD},uid=1000,gid=1000,file_mode=0600,dir_mode=0700,vers=3.0
+  #     device: //nas.lan/backups/saga

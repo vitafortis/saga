@@ -1,6 +1,7 @@
 import { json } from '@sveltejs/kit';
 import type { Handle, ServerInit } from '@sveltejs/kit/hooks';
 import { bearer, checkKey } from '#lib/server/api-keys.ts';
+import { scheduleBackups } from '#lib/server/backup.ts';
 import { isAuthed } from '#lib/server/auth.ts';
 import { keyLimiter } from '#lib/server/limits.ts';
 import { sweep } from '#lib/server/store.ts';
@@ -9,6 +10,7 @@ export const init: ServerInit = () => {
 	const run = () => sweep().catch((err) => console.error('[saga] sweep failed', err));
 	run();
 	setInterval(run, 5 * 60_000).unref();
+	scheduleBackups();
 };
 
 /**

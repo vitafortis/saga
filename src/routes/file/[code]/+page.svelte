@@ -1,18 +1,61 @@
 <script lang="ts">
-	import { Download, Flame } from '@lucide/svelte';
+	import { Download, Flame, Lock, LockOpen } from '@lucide/svelte';
 	import ItemHeader from '#lib/components/ItemHeader.svelte';
+	import Unlock from '#lib/components/Unlock.svelte';
+	import { saveBytes } from '#lib/client/files.ts';
+	import { decrypt } from '#lib/crypto.ts';
 	import { formatBytes } from '#lib/format.ts';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
 	let burned = $state(false);
 	const src = $derived(`/file/${data.item.code}/download?inline`);
+
+	// Encrypted: fetched once (a burn file is deleted then), kept in memory for retries, decrypted here.
+	let cipher: Uint8Array | null = null;
+	let decrypted = $state(false);
+	async function unlock(password: string) {
+		if (!cipher) {
+			const res = await fetch(`/file/${data.item.code}/download`, { method: data.item.burn ? 'POST' : 'GET' });
+			if (!res.ok) throw new Error(`Download failed (${res.status})`);
+			cipher = new Uint8Array(await res.arrayBuffer());
+			burned = data.item.burn;
+		}
+		saveBytes(await decrypt(cipher, password), data.item.name, data.item.mime);
+		decrypted = true;
+	}
 </script>
 
 <svelte:head><title>{data.item.name} · Saga</title></svelte:head>
 
 <ItemHeader item={data.item} collection={data.collection} />
 
+{#if data.item.encrypted}
+	{#if decrypted}
+		<div class="card flex flex-col items-center gap-4 p-6 text-center sm:flex-row sm:text-left">
+			<div class="grid size-10 shrink-0 place-items-center rounded-xl bg-success/10 text-success"><LockOpen class="size-5" /></div>
+			<div class="min-w-0 flex-1">
+				<p class="truncate text-sm font-medium">{data.item.name}</p>
+				<p class="mt-0.5 text-xs text-muted-foreground">
+					Decrypted and saved to your downloads.{#if burned} It's now deleted from the server.{/if}
+				</p>
+			</div>
+			<button class="btn btn-secondary" onclick={() => (decrypted = false)}><Download />Again</button>
+		</div>
+	{:else}
+		<Unlock action={data.item.burn && !burned ? 'Download, delete and decrypt' : 'Decrypt and download'} onunlock={unlock}>
+			<span class="inline-flex items-center gap-1"><Lock class="size-3" />{data.item.name} · {formatBytes(data.item.size)}</span><br />
+			{#if burned}
+				Deleted from the server, but still on this page: try the password again, or
+				<button class="text-primary hover:underline" onclick={() => cipher && saveBytes(cipher as Uint8Array<ArrayBuffer>, `${data.item.name}.enc`)}>save the encrypted file</button>.
+			{:else if data.item.burn}
+				It's deleted from the server when downloaded, but stays on this page so you can retry the password.
+			{:else}
+				Decrypted in your browser with the password it was shared with.
+			{/if}
+		</Unlock>
+	{/if}
+{:else}
 <div class="card overflow-hidden">
 	{#if data.preview === 'image'}
 		<div class="dot-grid grid place-items-center border-b border-border bg-surface p-4">
@@ -44,3 +87,4 @@
 		{/if}
 	</div>
 </div>
+{/if}

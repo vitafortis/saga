@@ -3,13 +3,14 @@ import { MAX_FILE_BYTES } from '#lib/server/config.ts';
 import { created } from '#lib/server/created.ts';
 import { requireAuth } from '#lib/server/lookup.ts';
 import { isExpiry } from '#lib/types.ts';
-import { burnParam } from '#lib/server/settings.ts';
-import { createFile, TooLargeError } from '#lib/server/store.ts';
+import { burnParam, flag } from '#lib/server/settings.ts';
+import { createFile, NotEncryptedError, TooLargeError } from '#lib/server/store.ts';
 import type { RequestHandler } from './$types';
 
 /**
  * The raw file as the body, streamed to disk (no multipart, nothing held in memory).
  * Name and options in the query: `curl -T photo.jpg '…/api/files?expiry=1d'` (curl adds the name).
+ * `encrypted=1`: the body is already encrypted (see crypto.ts); the name and type are the original's.
  */
 const upload: RequestHandler = async (event) => {
 	requireAuth(event);
@@ -23,11 +24,13 @@ const upload: RequestHandler = async (event) => {
 	try {
 		const item = await createFile(request.body, name, /^[\w.+-]+\/[\w.+-]+$/.test(mime) ? mime : '', {
 			expiry,
-			burn: burnParam(url.searchParams.get('burn'))
+			burn: burnParam(url.searchParams.get('burn')),
+			encrypted: flag(url.searchParams.get('encrypted'))
 		});
 		return created(item, event.locals.origin, request);
 	} catch (err) {
 		if (err instanceof TooLargeError) error(413, err.message);
+		if (err instanceof NotEncryptedError) error(400, err.message);
 		throw err;
 	}
 };

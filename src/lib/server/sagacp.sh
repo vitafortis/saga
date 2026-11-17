@@ -7,8 +7,10 @@
 #   journalctl -n 200 | sagacp     share text from a pipe
 #   sagacp 12345678                fetch: files and collections are saved here, text goes to stdout
 #   sagacp --install 12345678      install a collection's files (--dry-run to preview, --root for /etc)
+#   sagacp -p ~/.ssh/id_ed25519    encrypt with a password first; fetching asks for it (or set SAGA_PASS)
+#   sagacp --save 12345678         copy an item or collection to Saga's NAS folder
 #
-# Options: -e/--expire 10m|1h|1d|7d|30d|never  -1/--once  -k/--keep  -n/--name NAME  -q/--quiet  --no-copy
+# Options: -e/--expire 10m|1h|1d|7d|30d|never  -1/--once  -k/--keep  -n/--name NAME  -p/--encrypt  -q/--quiet  --no-copy
 # API key (Saga > Settings > API keys): SAGA_TOKEN, or the first line of ~/.config/saga/token
 set -eu
 
@@ -21,10 +23,10 @@ auth="Authorization: Bearer $token"
 # Everything goes through /api/v1, the part of Saga a proxy lets through on an API key alone.
 API="$SAGA_URL/api/v1"
 
-expiry='' burn='' name='' quiet=0 copy=1 install='' dry=0 root=0
+expiry='' burn='' name='' quiet=0 copy=1 install='' dry=0 root=0 encrypt=0 save=''
 
 usage() {
-	sed -n '2,12s/^# \{0,1\}//p' "$0" 2>/dev/null || echo "usage: sagacp [options] [file|dir|code ...]"
+	sed -n '2,14s/^# \{0,1\}//p' "$0" 2>/dev/null || echo "usage: sagacp [options] [file|dir|code ...]"
 }
 die() { echo "sagacp: $*" >&2; exit 1; }
 
@@ -34,9 +36,11 @@ while [ $# -gt 0 ]; do
 		-1 | --once) burn=1; shift ;;
 		-k | --keep) burn=0; shift ;;
 		-n | --name) [ $# -ge 2 ] || die "$1 needs a value"; name=$2; shift 2 ;;
+		-p | --encrypt) encrypt=1; shift ;;
 		-q | --quiet) quiet=1; shift ;;
 		--no-copy) copy=0; shift ;;
 		-i | --install) [ $# -ge 2 ] || die "$1 needs a collection code"; install=$2; shift 2 ;;
+		--save) [ $# -ge 2 ] || die "$1 needs a code"; save=$2; shift 2 ;;
 		--dry-run) dry=1; shift ;;
 		--root) root=1; shift ;;
 		-h | --help) usage; exit 0 ;;
@@ -59,6 +63,7 @@ query() {
 	[ -n "$expiry" ] && q="${q}&expiry=$(urlencode "$expiry")"
 	[ -n "$burn" ] && q="${q}&burn=$burn"
 	[ -n "$name" ] && q="${q}&title=$(urlencode "$name")"
+	[ "$encrypt" = 1 ] && q="${q}&encrypted=1"
 	printf %s "${q#&}"
 }
 
@@ -72,16 +77,55 @@ request() {
 		401) die "API key not accepted: check $config (or SAGA_TOKEN), or make a new one in Settings" ;;
 		*)
 			msg=$(printf %s "$body" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p')
+			# Pages that aren't API routes answer with HTML; their <title> is the message.
+			[ -n "$msg" ] || msg=$(printf %s "$body" | sed -n 's/.*<title>\(.*\)<\/title>.*/\1/p' | head -n 1)
 			die "${msg:-${body:-HTTP $status}}" ;;
 	esac
 }
+
+# Encryption is openssl's own format (the same as Saga's web app), so plain `openssl enc -d` works too.
+CIPHER='-aes-256-cbc -pbkdf2 -iter 600000 -md sha256'
+
+need_openssl() {
+	command -v openssl >/dev/null 2>&1 || die "openssl is required for encrypted items"
+	# shellcheck disable=SC2086
+	printf x | openssl enc $CIPHER -pass pass:x >/dev/null 2>&1 || die "this openssl can't do -pbkdf2: it needs OpenSSL 1.1.1 or later (macOS: brew install openssl)"
+}
+
+# Puts the password in SAGA_PASS (exported for openssl's -pass env:), asking on the terminal unless it's set.
+ask_password() { # ask_password <prompt> [confirm]
+	need_openssl
+	if [ -z "${SAGA_PASS:-}" ]; then
+		(: </dev/tty) 2>/dev/null || die "no terminal to ask for the password; set SAGA_PASS"
+		trap 'stty echo </dev/tty 2>/dev/null || true' EXIT INT TERM
+		stty -echo </dev/tty 2>/dev/null || true
+		printf '%s: ' "$1" >/dev/tty
+		IFS= read -r SAGA_PASS </dev/tty || true
+		printf '\n' >/dev/tty
+		if [ -n "${2:-}" ]; then
+			printf 'Again: ' >/dev/tty
+			IFS= read -r again </dev/tty || true
+			printf '\n' >/dev/tty
+			[ "$again" = "$SAGA_PASS" ] || die "the passwords don't match"
+		fi
+		stty echo </dev/tty 2>/dev/null || true
+	fi
+	[ -n "$SAGA_PASS" ] || die "no password"
+	[ -z "${2:-}" ] || [ ${#SAGA_PASS} -ge 8 ] || die "use a password of at least 8 characters"
+	export SAGA_PASS
+}
+
+# shellcheck disable=SC2086
+seal() { openssl enc $CIPHER -salt -pass env:SAGA_PASS "$@"; }
+# shellcheck disable=SC2086
+unseal() { openssl enc -d $CIPHER -pass env:SAGA_PASS "$@" 2>/dev/null; }
 
 last=''
 shared() { # shared <label> <url>
 	last=$2
 	if [ "$quiet" = 1 ]; then echo "$2"; return; fi
 	code=${2##*/}
-	printf '%s  %s  (code %s %s)\n' "$1" "$2" "$(printf %s "$code" | cut -c1-4)" "$(printf %s "$code" | cut -c5-)"
+	printf '%s  %s  (code %s %s)%s\n' "$1" "$2" "$(printf %s "$code" | cut -c1-4)" "$(printf %s "$code" | cut -c5-)" "$([ "$encrypt" = 1 ] && echo ', encrypted')"
 }
 
 mimetype() { file -b --mime-type "$1" 2>/dev/null || echo application/octet-stream; }
@@ -89,7 +133,11 @@ mimetype() { file -b --mime-type "$1" 2>/dev/null || echo application/octet-stre
 share_file() {
 	f=$1
 	n=${name:-$(basename "$f")}
-	url=$(request -T "$f" -H "Content-Type: $(mimetype "$f")" "$API/files/$(urlencode "$n")?$(query)")
+	if [ "$encrypt" = 1 ]; then
+		url=$(seal -in "$f" | request -T - -H "Content-Type: $(mimetype "$f")" "$API/files/$(urlencode "$n")?$(query)")
+	else
+		url=$(request -T "$f" -H "Content-Type: $(mimetype "$f")" "$API/files/$(urlencode "$n")?$(query)")
+	fi
 	shared "$n" "$url"
 }
 
@@ -97,17 +145,29 @@ share_dir() {
 	d=${1%/}
 	n=${name:-$(basename "$d").tar.gz}
 	command -v tar >/dev/null 2>&1 || die "tar is required to share a folder"
-	url=$(tar -czf - -C "$(dirname "$d")" "$(basename "$d")" | request -T - -H 'Content-Type: application/gzip' "$API/files/$(urlencode "$n")?$(query)")
+	if [ "$encrypt" = 1 ]; then
+		url=$(tar -czf - -C "$(dirname "$d")" "$(basename "$d")" | seal | request -T - -H 'Content-Type: application/gzip' "$API/files/$(urlencode "$n")?$(query)")
+	else
+		url=$(tar -czf - -C "$(dirname "$d")" "$(basename "$d")" | request -T - -H 'Content-Type: application/gzip' "$API/files/$(urlencode "$n")?$(query)")
+	fi
 	shared "$n" "$url"
 }
 
 share_stdin() {
-	url=$(request --data-binary @- -H 'Content-Type: text/plain' "$API/pastes?$(query)")
+	if [ "$encrypt" = 1 ]; then
+		url=$(seal -a -A | request --data-binary @- -H 'Content-Type: text/plain' "$API/pastes?$(query)")
+	else
+		url=$(request --data-binary @- -H 'Content-Type: text/plain' "$API/pastes?$(query)")
+	fi
 	shared "${name:-text}" "$url"
 }
 
+# A name that isn't taken here: name, name.1, name.2…
+unique() { t=$1 i=1; while [ -e "$t" ]; do t="$1.$i"; i=$((i + 1)); done; printf %s "$t"; }
+
 # Downloads to a temp file first, then names it from the server's Content-Disposition,
 # never overwriting: a delete-after-first-open item is gone once fetched, so it must land somewhere.
+# With enc=1 it's decrypted; on a wrong password the encrypted copy is kept instead.
 download() { # download <url> [curl options...]
 	url=$1; shift
 	tmp=$(mktemp ./.sagacp.XXXXXX) hdr=$(mktemp)
@@ -115,27 +175,46 @@ download() { # download <url> [curl options...]
 	n=$(sed -n 's/.*filename="\([^"]*\)".*/\1/p' "$hdr" | tr -d '\r' | head -n 1)
 	rm -f "$hdr"
 	n=$(basename "${n:-download}")
-	target=$n i=1
-	while [ -e "$target" ]; do target="$n.$i"; i=$((i + 1)); done
+	if [ "${enc:-0}" = 1 ]; then
+		plain=$(mktemp ./.sagacp.XXXXXX)
+		if unseal -in "$tmp" -out "$plain"; then
+			rm -f "$tmp"
+			tmp=$plain n=${n%.enc}
+		else
+			rm -f "$plain"
+			target=$(unique "$n")
+			mv "$tmp" "$target"
+			die "wrong password; the encrypted file is saved as $target (decrypt: openssl enc -d $CIPHER -in $target -out ${n%.enc})"
+		fi
+	fi
+	target=$(unique "$n")
 	mv "$tmp" "$target"
 	[ "$quiet" = 1 ] && echo "$target" || echo "saved $target" >&2
 }
 
-# What a code points to: paste, file or collection (and, for items, whether it burns).
+# What a code points to: paste, file or collection (and, for items, whether it burns or is encrypted).
 resolve() { request "$API/resolve/$1"; }
 
 fetch() { # fetch <code>
 	code=$(printf %s "$1" | tr -d ' -')
 	info=$(resolve "$code")
+	# Delete-after-first-open items only open with a POST.
+	case $info in *'"burn":true'*) method=POST ;; *) method=GET ;; esac
+	case $info in *'"encrypted":true'*) enc=1; ask_password "Password for $code" ;; *) enc=0 ;; esac
 	case $info in
 		*'"kind":"paste"'*)
-			# Delete-after-first-open items only open with a POST.
-			case $info in *'"burn":true'*) method=POST ;; *) method=GET ;; esac
+			if [ "$enc" = 1 ]; then
+				tmp=$(mktemp)
+				curl -sSf -H "$auth" -X "$method" -o "$tmp" "$API/paste/$code/raw" || { rm -f "$tmp"; die "couldn't fetch $code"; }
+				unseal -a -A -in "$tmp" && { rm -f "$tmp"; return; }
+				target=$(unique "$code.txt.b64.enc")
+				mv "$tmp" "$target"
+				die "wrong password; the encrypted text is saved as $target (decrypt: openssl enc -d $CIPHER -a -A -in $target)"
+			fi
 			# Straight to stdout (not via request), so the text comes out byte for byte.
 			curl -sSf -H "$auth" -X "$method" "$API/paste/$code/raw" || die "couldn't fetch $code" ;;
 		*'"kind":"file"'*)
-			case $info in *'"burn":true'*) set -- -X POST ;; *) set -- ;; esac
-			download "$API/file/$code/download" "$@" || die "couldn't download $code" ;;
+			download "$API/file/$code/download" -X "$method" || die "couldn't download $code" ;;
 		*'"kind":"collection"'*)
 			download "$API/collections/$code/archive" || die "couldn't download collection $code"
 			[ "$quiet" = 1 ] || echo "to install its files instead: sagacp --install $code" >&2 ;;
@@ -149,9 +228,20 @@ install_collection() { # install_collection <code>
 	curl -sSf -H "$auth" -o "$script" "$API/collections/$code/install.sh" || { rm -f "$script"; die "couldn't get collection $code"; }
 	set -- "$script"
 	[ "$dry" = 1 ] && set -- "$script" --dry-run
-	# Fetched as you (with your key), then run as root only if asked.
-	if [ "$root" = 1 ]; then sudo sh "$@"; else sh "$@"; fi || { rm -f "$script"; exit 1; }
+	# Fetched as you (with your key), then run as root only if asked (sudo -E keeps SAGA_PASS, if set).
+	if [ "$root" = 1 ]; then sudo -E sh "$@"; else sh "$@"; fi || { rm -f "$script"; exit 1; }
 	rm -f "$script"
+}
+
+# Copies an item or collection into Saga's NAS folder (Settings > Backups).
+save_to_nas() { # save_to_nas <code>
+	code=$(printf %s "$1" | tr -d ' -')
+	case $(resolve "$code") in
+		*'"kind":"collection"'*) what=collections ;;
+		*) what=items ;;
+	esac
+	out=$(request -X POST "$API/$what/$code/save")
+	echo "saved to NAS: $(printf %s "$out" | sed -n 's/.*"path":"\([^"]*\)".*/\1/p')"
 }
 
 copy_link() {
@@ -167,7 +257,17 @@ copy_link() {
 if [ -n "$install" ]; then
 	install_collection "$install"
 	exit 0
-elif [ $# -eq 0 ] || [ "$1" = - ]; then
+elif [ -n "$save" ]; then
+	save_to_nas "$save"
+	exit 0
+fi
+# Sharing with -p: one password for everything shared in this run.
+sharing=0
+for arg in "$@"; do [ -e "$arg" ] && sharing=1; done
+{ [ $# -eq 0 ] || [ "$1" = - ]; } && sharing=1
+[ "$encrypt" = 1 ] && [ "$sharing" = 1 ] && ask_password "Password to encrypt with" confirm
+
+if [ $# -eq 0 ] || [ "$1" = - ]; then
 	[ -t 0 ] && { usage >&2; exit 2; }
 	share_stdin
 else

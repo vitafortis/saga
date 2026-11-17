@@ -21,6 +21,8 @@ export type Item = {
 	path: string | null;
 	/** Octal file mode for the install script, e.g. 600 or 755. */
 	mode: string | null;
+	/** Encrypted in the browser or by sagacp (see crypto.ts); Saga holds only the ciphertext. */
+	encrypted: boolean;
 };
 
 /** A named set of files, e.g. everything a new machine needs. */
@@ -63,4 +65,19 @@ export type ApiKey = {
 	prefix: string;
 	createdAt: number;
 	lastUsedAt: number | null;
+};
+
+/** A full backup in the NAS folder. */
+export type Snapshot = { name: string; size: number; createdAt: number };
+
+export type BackupStatus = {
+	/** SAGA_BACKUP_DIR is set. */
+	enabled: boolean;
+	dir: string;
+	/** 0: manual only. */
+	everyHours: number;
+	keep: number;
+	running: boolean;
+	lastError: string | null;
+	snapshots: Snapshot[];
 };

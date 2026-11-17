@@ -40,7 +40,8 @@ const columns = new Set((db.prepare('PRAGMA table_info(items)').all() as { name:
 for (const [name, type] of [
 	['collection', 'TEXT'],
 	['path', 'TEXT'],
-	['mode', 'TEXT']
+	['mode', 'TEXT'],
+	['encrypted', 'INTEGER NOT NULL DEFAULT 0']
 ]) {
 	if (!columns.has(name)) db.exec(`ALTER TABLE items ADD COLUMN ${name} ${type}`);
 }

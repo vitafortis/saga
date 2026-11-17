@@ -7,8 +7,10 @@
 		FilePlus,
 		FileText,
 		FolderOpen,
+		HardDriveDownload,
 		Link,
 		LoaderCircle,
+		Lock,
 		Pencil,
 		QrCode,
 		Terminal,
@@ -19,9 +21,11 @@
 	import { slide } from 'svelte/transition';
 	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
+	import PasswordFields, { passwordProblem } from '#lib/components/PasswordFields.svelte';
 	import Qr from '#lib/components/Qr.svelte';
 	import { api, errorMessage, uploadFile } from '#lib/client/api.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
+	import { encrypt, encryptText } from '#lib/crypto.ts';
 	import { formatBytes, groupCode, relativeTime } from '#lib/format.ts';
 	import type { Item } from '#lib/types.ts';
 	import type { PageProps } from './$types';
@@ -44,6 +48,25 @@
 	const placed = $derived(data.items.filter((i) => i.path));
 	const needsRoot = $derived(placed.some((i) => !i.path!.startsWith('~/')));
 	const hasHome = $derived(placed.some((i) => i.path!.startsWith('~/')));
+	const placedEncrypted = $derived(placed.some((i) => i.encrypted));
+
+	// New files (uploads and text) can be encrypted here first; install.sh asks for the password.
+	let locked = $state(false);
+	let password = $state('');
+	let confirmPw = $state('');
+	const lockProblem = $derived(locked ? passwordProblem(password, confirmPw) : null);
+
+	let savingNas = $state(false);
+	async function saveToNas() {
+		savingNas = true;
+		try {
+			const { path } = await api.post<{ path: string }>(`/api/collections/${c.code}/save`);
+			toast('success', 'Saved to NAS', path);
+		} catch (err) {
+			toast('error', 'Couldn’t save', errorMessage(err));
+		}
+		savingNas = false;
+	}
 
 	// Name and description, edited in place.
 	let editingInfo = $state(false);
@@ -75,26 +98,28 @@
 	}
 
 	// The editor: a new text file, or an existing item (text gets its content; files only name/path/mode).
-	type Draft = { code: string | null; kind: 'paste' | 'file'; name: string; path: string; mode: string; content: string };
+	type Draft = { code: string | null; kind: 'paste' | 'file'; name: string; path: string; mode: string; content: string; encrypted: boolean };
 	let draft = $state<Draft | null>(null);
 	let saving = $state(false);
 
 	function newText() {
-		draft = { code: null, kind: 'paste', name: '', path: '', mode: '', content: '' };
+		draft = { code: null, kind: 'paste', name: '', path: '', mode: '', content: '', encrypted: false };
 	}
 
 	async function edit(item: Item) {
-		const content = item.kind === 'paste' ? await fetch(`/paste/${item.code}/raw`).then((r) => r.text()) : '';
-		draft = { code: item.code, kind: item.kind, name: item.name, path: item.path ?? '', mode: item.mode ?? '', content };
+		const content = item.kind === 'paste' && !item.encrypted ? await fetch(`/paste/${item.code}/raw`).then((r) => r.text()) : '';
+		draft = { code: item.code, kind: item.kind, name: item.name, path: item.path ?? '', mode: item.mode ?? '', content, encrypted: item.encrypted };
 	}
 
 	async function saveDraft(e: SubmitEvent) {
 		e.preventDefault();
 		if (!draft) return;
+		if (!draft.code && lockProblem) return toast('error', 'Check the password', lockProblem);
 		saving = true;
 		try {
-			const body = { name: draft.name, path: draft.path, mode: draft.mode, ...(draft.kind === 'paste' ? { content: draft.content } : {}) };
+			const body = { name: draft.name, path: draft.path, mode: draft.mode, ...(draft.kind === 'paste' && !draft.encrypted ? { content: draft.content } : {}) };
 			if (draft.code) await api.patch(`/api/items/${draft.code}`, body);
+			else if (locked) await api.post(`/api/collections/${c.code}/items`, { ...body, content: await encryptText(draft.content, password), encrypted: true });
 			else await api.post(`/api/collections/${c.code}/items`, body);
 			draft = null;
 			invalidateAll();
@@ -118,11 +143,13 @@
 	let dragging = $state(0);
 	async function upload(list: FileList | null | undefined) {
 		if (!list?.length || !authed) return;
+		if (lockProblem) return toast('error', 'Check the password', lockProblem);
 		try {
 			for (const file of Array.from(list)) {
 				uploading = { name: file.name, progress: 0 };
-				const q = new URLSearchParams({ name: file.name });
-				await uploadFile(file, `/api/collections/${c.code}/items?${q}`, (f) => uploading && (uploading.progress = f)).done;
+				const q = new URLSearchParams({ name: file.name, encrypted: locked ? '1' : '0' });
+				const body = locked ? new File([await encrypt(new Uint8Array(await file.arrayBuffer()), password)], file.name, { type: file.type }) : file;
+				await uploadFile(body, `/api/collections/${c.code}/items?${q}`, (f) => uploading && (uploading.progress = f)).done;
 			}
 			toast('success', list.length === 1 ? 'File added' : `${list.length} files added`, 'Set a target path to include it in the install script.');
 		} catch (err) {
@@ -188,6 +215,11 @@
 	</div>
 	<div class="flex flex-wrap items-center gap-2">
 		<a class="btn btn-secondary btn-sm" href="/collection/{c.code}/archive" download><Download />.tar.gz</a>
+		{#if page.data.backups && authed}
+			<button class="btn btn-secondary btn-sm" onclick={saveToNas} disabled={savingNas} title="Copy the files to the NAS, at their target paths">
+				{#if savingNas}<LoaderCircle class="animate-spin" />{:else}<HardDriveDownload />{/if}Save to NAS
+			</button>
+		{/if}
 		<button class="btn btn-secondary btn-sm" onclick={() => copy(url, 'Link copied')}><Link />Link</button>
 		<button class="btn btn-secondary btn-icon btn-sm {showQr ? 'bg-accent' : ''}" onclick={() => (showQr = !showQr)} aria-label="QR code" title="QR code"><QrCode /></button>
 		{#if authed}
@@ -238,6 +270,7 @@
 			Writes {placed.length} {placed.length === 1 ? 'file' : 'files'}{data.items.length > placed.length ? ` (${data.items.length - placed.length} without a path are skipped)` : ''}. Changed files are kept as
 			<span class="font-mono">.saga-bak</span>.
 			{#if needsRoot}System paths need <b class="font-medium text-foreground">As root</b>{#if hasHome}, where <span class="font-mono">~</span> is root's home{/if}.{/if}
+			{#if placedEncrypted}Asks for the password of encrypted files (needs openssl).{/if}
 			Needs an API key (Settings).
 			<a class="text-primary hover:underline" href="/collection/{c.code}/install.sh" target="_blank" rel="noreferrer">View script</a>
 		{/if}
@@ -248,7 +281,7 @@
 {#if draft}
 	<form transition:slide={{ duration: 160 }} class="card mb-5 overflow-hidden" onsubmit={saveDraft}>
 		<div class="flex items-center justify-between border-b border-border px-4 py-2.5">
-			<p class="text-[0.8125rem] font-medium">{draft.code ? `Edit ${draft.name}` : 'New text file'}</p>
+			<p class="text-[0.8125rem] font-medium">{draft.code ? `Edit ${draft.name}` : locked ? 'New encrypted text file' : 'New text file'}</p>
 			<button type="button" class="btn btn-ghost btn-icon btn-sm" onclick={() => (draft = null)} aria-label="Close"><X /></button>
 		</div>
 		<div class="grid gap-3 p-4 sm:grid-cols-[1fr_2fr_6rem]">
@@ -265,7 +298,11 @@
 				<label class="label" for="d-mode">Mode</label>
 				<input id="d-mode" class="input font-mono text-[0.8125rem]" bind:value={draft.mode} placeholder="644" maxlength="4" inputmode="numeric" />
 			</div>
-			{#if draft.kind === 'paste'}
+			{#if draft.encrypted}
+				<p class="flex items-center gap-2 text-xs text-muted-foreground sm:col-span-3">
+					<Lock class="size-3.5 text-primary" />Encrypted: Saga can't show or edit the contents. To change them, remove it and add it again.
+				</p>
+			{:else if draft.kind === 'paste'}
 				<textarea
 					class="input h-auto min-h-64 resize-y py-2.5 font-mono text-[0.8125rem] leading-relaxed sm:col-span-3"
 					bind:value={draft.content}
@@ -286,6 +323,10 @@
 	<h2 class="text-sm font-semibold tracking-tight">Files</h2>
 	{#if authed}
 		<div class="ml-auto flex gap-2">
+			<label class="mr-1 flex cursor-pointer items-center gap-2 text-[0.8125rem] text-muted-foreground select-none" title="Encrypt new files and uploads with a password">
+				<input type="checkbox" class="size-4 accent-[var(--primary)]" bind:checked={locked} />
+				<Lock class="size-4 {locked ? 'text-primary' : ''}" />Encrypt
+			</label>
 			<button class="btn btn-secondary btn-sm" onclick={newText}><FilePlus />New text file</button>
 			<label class="btn btn-primary btn-sm cursor-pointer">
 				{#if uploading}<LoaderCircle class="animate-spin" />{Math.round(uploading.progress * 100)}%{:else}<Upload />Upload{/if}
@@ -294,6 +335,10 @@
 		</div>
 	{/if}
 </div>
+
+{#if locked}
+	<div transition:slide={{ duration: 160 }} class="card mb-3 p-3"><PasswordFields bind:password bind:confirm={confirmPw} /></div>
+{/if}
 
 {#if data.items.length === 0}
 	<div class="card dot-grid px-4 py-12 text-center text-[0.8125rem] text-muted-foreground">
@@ -310,6 +355,7 @@
 					<p class="truncate text-[0.8125rem] font-medium">{item.name}</p>
 					<p class="truncate font-mono text-xs {item.path ? 'text-muted-foreground' : 'text-muted-foreground/60 italic'}">{item.path ?? 'no target path'}</p>
 				</a>
+				{#if item.encrypted}<span class="badge badge-primary" title="Encrypted"><Lock /></span>{/if}
 				{#if item.mode}<span class="badge font-mono">{item.mode}</span>{/if}
 				<span class="hidden w-16 text-right text-xs text-muted-foreground tabular-nums sm:block">{formatBytes(item.size)}</span>
 				{#if authed}
@@ -318,7 +364,7 @@
 				<a
 					class="btn btn-ghost btn-icon btn-sm"
 					href={item.kind === 'paste' ? `/paste/${item.code}/raw?download` : `/file/${item.code}/download`}
-					download={item.name}
+					download
 					aria-label="Download {item.name}"
 					title="Download"><Download /></a
 				>
