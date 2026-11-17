@@ -15,6 +15,23 @@ export type Item = {
 	/** Deleted the first time it's opened. */
 	burn: boolean;
 	views: number;
+	/** Code of the collection this belongs to, if any. */
+	collection: string | null;
+	/** Where the install script writes it: absolute or ~/ (collection items only). */
+	path: string | null;
+	/** Octal file mode for the install script, e.g. 600 or 755. */
+	mode: string | null;
+};
+
+/** A named set of files, e.g. everything a new machine needs. */
+export type Collection = {
+	code: string;
+	name: string;
+	description: string;
+	createdAt: number;
+	updatedAt: number;
+	count: number;
+	size: number;
 };
 
 export const EXPIRY_OPTIONS = [

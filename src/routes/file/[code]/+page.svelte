@@ -11,7 +11,7 @@
 
 <svelte:head><title>{data.item.name} · Saga</title></svelte:head>
 
-<ItemHeader item={data.item} />
+<ItemHeader item={data.item} collection={data.collection} />
 
 <div class="card overflow-hidden">
 	{#if data.preview === 'image'}

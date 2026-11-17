@@ -24,3 +24,24 @@ db.exec(`
 	);
 	CREATE INDEX IF NOT EXISTS items_expires ON items (expires_at) WHERE expires_at IS NOT NULL;
 `);
+
+// Collections: named sets of files for setting up machines. Their items carry the
+// collection's code and an optional target path and mode; they never expire.
+db.exec(`
+	CREATE TABLE IF NOT EXISTS collections (
+		code TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL,
+		updated_at INTEGER NOT NULL
+	);
+`);
+const columns = new Set((db.prepare('PRAGMA table_info(items)').all() as { name: string }[]).map((c) => c.name));
+for (const [name, type] of [
+	['collection', 'TEXT'],
+	['path', 'TEXT'],
+	['mode', 'TEXT']
+]) {
+	if (!columns.has(name)) db.exec(`ALTER TABLE items ADD COLUMN ${name} ${type}`);
+}
+db.exec('CREATE INDEX IF NOT EXISTS items_collection ON items (collection) WHERE collection IS NOT NULL');

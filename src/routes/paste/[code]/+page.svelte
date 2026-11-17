@@ -38,7 +38,7 @@
 
 <svelte:head><title>{data.item.name || 'Paste'} · Saga</title></svelte:head>
 
-<ItemHeader item={data.item}>
+<ItemHeader item={data.item} collection={data.collection}>
 	{#snippet actions()}
 		{#if content !== null}
 			<button class="btn btn-primary btn-sm" onclick={() => copy(content ?? '', 'Text copied')}><Copy />Copy</button>

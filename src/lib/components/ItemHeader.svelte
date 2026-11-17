@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Clock, Eye, File as FileIcon, FileText, Flame, Link, QrCode, Trash2 } from '@lucide/svelte';
+	import { ChevronLeft, Clock, Eye, File as FileIcon, FileText, Flame, FolderOpen, Link, QrCode, Trash2 } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { goto } from '$app/navigation';
@@ -7,10 +7,10 @@
 	import { api, errorMessage } from '#lib/client/api.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
 	import { formatBytes, groupCode, relativeTime } from '#lib/format.ts';
-	import type { Item } from '#lib/types.ts';
+	import type { Collection, Item } from '#lib/types.ts';
 	import Qr from './Qr.svelte';
 
-	let { item, actions }: { item: Item; actions?: Snippet } = $props();
+	let { item, collection = null, actions }: { item: Item; collection?: Collection | null; actions?: Snippet } = $props();
 	let showQr = $state(false);
 	const url = $derived(`${page.data.origin}/${item.kind}/${item.code}`);
 
@@ -18,13 +18,18 @@
 		try {
 			await api.del(`/api/items/${item.code}`);
 			toast('success', 'Deleted');
-			goto('/', { invalidateAll: true });
+			goto(collection ? `/collection/${collection.code}` : '/', { invalidateAll: true });
 		} catch (err) {
 			toast('error', 'Couldn’t delete', errorMessage(err));
 		}
 	}
 </script>
 
+{#if collection}
+	<a href="/collection/{collection.code}" class="mb-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">
+		<ChevronLeft class="size-3.5" /><FolderOpen class="size-3.5" />{collection.name}
+	</a>
+{/if}
 <div class="mb-4 flex flex-col gap-4 sm:flex-row sm:items-start">
 	<div class="flex min-w-0 flex-1 items-start gap-3">
 		<div class="grid size-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary [&_svg]:size-5">
@@ -39,6 +44,7 @@
 				<span class="inline-flex items-center gap-1"><Clock class="size-3" />{item.expiresAt ? `expires ${relativeTime(item.expiresAt)}` : 'never expires'}</span>
 				{#if item.views}<span class="inline-flex items-center gap-1"><Eye class="size-3" />{item.views}</span>{/if}
 				{#if item.burn}<span class="badge badge-warning"><Flame />Deleted after first open</span>{/if}
+				{#if item.path}<span class="badge font-mono">{item.path}{item.mode ? ` · ${item.mode}` : ''}</span>{/if}
 			</p>
 		</div>
 	</div>

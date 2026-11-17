@@ -19,9 +19,12 @@ type Row = {
 	expires_at: number | null;
 	burn: number;
 	views: number;
+	collection: string | null;
+	path: string | null;
+	mode: string | null;
 };
 
-const COLUMNS = 'code, kind, name, mime, size, created_at, expires_at, burn, views';
+const COLUMNS = 'code, kind, name, mime, size, created_at, expires_at, burn, views, collection, path, mode';
 
 const toItem = (r: Row): Item => ({
 	code: r.code,
@@ -32,7 +35,10 @@ const toItem = (r: Row): Item => ({
 	createdAt: r.created_at,
 	expiresAt: r.expires_at,
 	burn: !!r.burn,
-	views: r.views
+	views: r.views,
+	collection: r.collection,
+	path: r.path,
+	mode: r.mode
 });
 
 export class TooLargeError extends Error {}
@@ -52,8 +58,9 @@ export function expiresAt(expiry: string | null | undefined, now = Date.now()): 
 }
 
 /** A random numeric code that isn't taken. Easy to read out or type on a phone. */
-function newCode(): string {
-	const exists = db.prepare('SELECT 1 FROM items WHERE code = ?');
+export function newCode(): string {
+	// Items and collections share one space of codes, so /<code> finds either.
+	const exists = db.prepare('SELECT 1 FROM items WHERE code = ?1 UNION ALL SELECT 1 FROM collections WHERE code = ?1');
 	for (;;) {
 		let code = String(randomInt(1, 10)); // no leading zero, so it survives being treated as a number
 		while (code.length < CODE_LENGTH) code += randomInt(0, 10);
@@ -61,14 +68,46 @@ function newCode(): string {
 	}
 }
 
-type Options = { expiry?: Expiry | string | null; burn?: boolean };
+type Options = {
+	expiry?: Expiry | string | null;
+	burn?: boolean;
+	/** Adds the item to this collection: it then never expires and can be opened any number of times. */
+	collection?: string;
+	path?: string | null;
+	mode?: string | null;
+};
+
+/** Target paths for the install script: absolute or under ~/, no `..`, printable. */
+export function cleanPath(path: string | null | undefined): string | null | Error {
+	const p = (path ?? '').trim();
+	if (!p) return null;
+	// eslint-disable-next-line no-control-regex
+	if (!/^(\/|~\/)/.test(p) || /[\u0000-\u001f\u007f]/.test(p) || p.split('/').includes('..') || p.endsWith('/') || p.length > 1024) {
+		return new Error('Paths start with / or ~/, name a file, and can’t contain ..');
+	}
+	return p;
+}
+
+export function cleanMode(mode: string | null | undefined): string | null | Error {
+	const m = (mode ?? '').trim();
+	if (!m) return null;
+	return /^0?[0-7]{3}$/.test(m) ? m.replace(/^0/, '') : new Error('Mode is octal, like 644 or 600');
+}
+
+/** Columns shared by both kinds of item, with collection items pinned to never expire or burn. */
+function common(opts: Options, now: number) {
+	if (opts.collection) return { expires: null, burn: 0, collection: opts.collection, path: opts.path ?? null, mode: opts.mode ?? null };
+	return { expires: expiresAt(opts.expiry, now), burn: opts.burn ? 1 : 0, collection: null, path: null, mode: null };
+}
 
 export function createPaste(content: string, title: string, opts: Options): Item {
 	const code = newCode();
 	const now = Date.now();
+	const c = common(opts, now);
 	db.prepare(
-		'INSERT INTO items (code, kind, name, mime, size, content, created_at, expires_at, burn) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-	).run(code, 'paste', title.slice(0, 200), 'text/plain', Buffer.byteLength(content), content, now, expiresAt(opts.expiry, now), opts.burn ? 1 : 0);
+		'INSERT INTO items (code, kind, name, mime, size, content, created_at, expires_at, burn, collection, path, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+	).run(code, 'paste', title.slice(0, 200), 'text/plain', Buffer.byteLength(content), content, now, c.expires, c.burn, c.collection, c.path, c.mode);
+	touchCollection(opts.collection);
 	return getItem(code)!;
 }
 
@@ -89,9 +128,10 @@ export async function createFile(body: ReadableStream<Uint8Array>, name: string,
 		await pipeline(Readable.fromWeb(body as import('node:stream/web').ReadableStream), limit, out);
 		// The row goes in before the blob appears, so sweep() never sees a blob without one.
 		const now = Date.now();
+		const c = common(opts, now);
 		db.prepare(
-			'INSERT INTO items (code, kind, name, mime, size, created_at, expires_at, burn) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-		).run(code, 'file', cleanName(name), mime || 'application/octet-stream', size, now, expiresAt(opts.expiry, now), opts.burn ? 1 : 0);
+			'INSERT INTO items (code, kind, name, mime, size, created_at, expires_at, burn, collection, path, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+		).run(code, 'file', cleanName(name), mime || 'application/octet-stream', size, now, c.expires, c.burn, c.collection, c.path, c.mode);
 		await rename(tmp, blobPath(code)).catch((err) => {
 			db.prepare('DELETE FROM items WHERE code = ?').run(code);
 			throw err;
@@ -102,7 +142,26 @@ export async function createFile(body: ReadableStream<Uint8Array>, name: string,
 		await rm(tmp, { force: true });
 		throw err;
 	}
+	touchCollection(opts.collection);
 	return getItem(code)!;
+}
+
+export function touchCollection(code: string | null | undefined) {
+	if (code) db.prepare('UPDATE collections SET updated_at = ? WHERE code = ?').run(Date.now(), code);
+}
+
+/** Renames an item, moves it (path, mode) or replaces a paste's text. */
+export function updateItem(code: string, changes: { name?: string; path?: string | null; mode?: string | null; content?: string }): Item | null {
+	const item = getItem(code);
+	if (!item) return null;
+	if (changes.name !== undefined) db.prepare('UPDATE items SET name = ? WHERE code = ?').run(item.kind === 'file' ? cleanName(changes.name) : changes.name.slice(0, 200), code);
+	if (changes.path !== undefined) db.prepare('UPDATE items SET path = ? WHERE code = ?').run(changes.path, code);
+	if (changes.mode !== undefined) db.prepare('UPDATE items SET mode = ? WHERE code = ?').run(changes.mode, code);
+	if (changes.content !== undefined && item.kind === 'paste') {
+		db.prepare('UPDATE items SET content = ?, size = ? WHERE code = ?').run(changes.content, Buffer.byteLength(changes.content), code);
+	}
+	touchCollection(item.collection);
+	return getItem(code);
 }
 
 /** File names come from the client: keep them printable and free of path separators. */
@@ -135,7 +194,7 @@ export function countView(code: string) {
 
 export function listItems(): Item[] {
 	const rows = db
-		.prepare(`SELECT ${COLUMNS} FROM items WHERE expires_at IS NULL OR expires_at > ? ORDER BY created_at DESC LIMIT 200`)
+		.prepare(`SELECT ${COLUMNS} FROM items WHERE collection IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC LIMIT 200`)
 		.all(Date.now()) as Row[];
 	return rows.map(toItem);
 }
@@ -149,7 +208,9 @@ export function usage(): { count: number; bytes: number } {
 }
 
 export async function deleteItem(code: string): Promise<boolean> {
+	const row = db.prepare('SELECT collection FROM items WHERE code = ?').get(code) as { collection: string | null } | undefined;
 	const claimed = claim(code);
+	touchCollection(row?.collection);
 	await deleteBlob(code);
 	return claimed;
 }

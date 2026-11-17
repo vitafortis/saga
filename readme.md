@@ -15,6 +15,7 @@ https://data.armgrp.dev/12345678   → redirects to the paste or file
 - **Expiry**: 10 minutes, 1 hour, 1 day (default), 1 week, 30 days or never. Expired items are removed every 5 minutes.
 - **Delete after first open**: the item can be opened once, then it's gone. Opening takes a deliberate click (a POST), so link previews in chat apps don't use it up.
 - **Recent**: an index of what you've shared, with search, Text/Files filters, image thumbnails, view counts, links and delete.
+- **Collections**: named sets of config files, dotfiles and keys for setting up a machine. Give each file a target path (`~/.bashrc`, `/etc/hosts`) and a mode, then run one command on the new machine (see [Collections](#collections)). Text files can be edited in place, and collections never expire.
 - **Settings**: default expiry and delete-after-first-open for new items, kept on the server so every device and script gets them.
 - **Light and dark** themes, built on the same design system as our other apps.
 
@@ -57,6 +58,20 @@ Scripts can't get past forward auth on their own: give them the proxy's own bypa
 | `SAGA_DATA_DIR` | `/data` | SQLite database, uploaded files, session key. |
 | `ORIGIN` | unset | Public address, e.g. `https://data.armgrp.dev`. |
 
+## Collections
+
+Make one from **New collection** on the home page, then add text files or uploads and give each a target path and, if needed, a mode (`600` for keys, `755` for scripts; `644` otherwise). The collection page shows the command to run on the new machine:
+
+```sh
+curl -fsSL https://data.armgrp.dev/collection/12345678/install.sh | sh                  # install
+curl -fsSL https://data.armgrp.dev/collection/12345678/install.sh | sh -s -- --dry-run  # preview
+curl -fsSL https://data.armgrp.dev/collection/12345678/install.sh | sudo sh             # /etc and other system paths
+```
+
+The script is plain POSIX `sh` with the files embedded, so it needs only `base64`, `mktemp` and `cmp` (Linux, BusyBox and macOS all have them). It creates folders, sets modes, leaves identical files alone and keeps any file it replaces as `<file>.saga-bak`. Under `sudo`, `~` means root's home. Files without a target path aren't installed, but they're in the `.tar.gz` download along with everything else.
+
+Anyone who can reach Saga and has the code can read a collection, keys included. Behind SSO the install command needs a bypass for `/collection/*/install.sh`, or download the script in a browser and run it.
+
 ## From the command line
 
 With `SAGA_PASSWORD` and `SAGA_API_TOKEN` set (behind SSO, drop the `Authorization` header and use your proxy's bypass instead):
@@ -88,6 +103,12 @@ Options go in the query string: `expiry` (`10m`, `1h`, `1d`, `7d`, `30d`, `never
 | `DELETE /api/items/<code>` | Delete an item. |
 | `GET /paste/<code>/raw` | Paste as text (`?download` to save it). |
 | `GET /file/<code>/download` | File as an attachment; supports `Range`. |
+| `POST /api/collections` | `{ name, description? }` creates a collection. |
+| `POST /api/collections/<code>/items` | Text file: `{ name, content, path?, mode? }`. |
+| `PUT /api/collections/<code>/items?name=&path=&mode=` | File upload into a collection. |
+| `PATCH /api/items/<code>` | `{ name?, content?, path?, mode? }`. |
+| `GET /collection/<code>/install.sh` | The install script. |
+| `GET /collection/<code>/archive` | Everything as `.tar.gz`. |
 | `GET`/`PUT /api/settings` | `{ defaultExpiry, defaultBurn }`. |
 | `GET /api/health` | `{ ok: true }` |
 

@@ -15,7 +15,7 @@
 </script>
 
 <header class="sticky top-0 z-30 border-b border-border bg-background/80 backdrop-blur-md">
-	<div class="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4">
+	<div class="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4 sm:px-6">
 		<a href="/" class="flex items-center gap-2.5 font-semibold tracking-tight">
 			<Logo size={26} />
 			<span>Saga</span>

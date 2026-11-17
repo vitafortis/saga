@@ -23,6 +23,7 @@ export const api = {
 	get: <T>(url: string) => request<T>('GET', url),
 	post: <T>(url: string, body?: unknown) => request<T>('POST', url, body ?? {}),
 	put: <T>(url: string, body: unknown) => request<T>('PUT', url, body),
+	patch: <T>(url: string, body: unknown) => request<T>('PATCH', url, body),
 	del: <T>(url: string) => request<T>('DELETE', url)
 };
 
@@ -30,17 +31,11 @@ export function errorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
-/** PUTs a file with upload progress (fetch can't report it). */
-export function uploadFile(
-	file: File,
-	opts: { expiry: string; burn: boolean },
-	onProgress: (fraction: number) => void
-): { done: Promise<{ item: import('#lib/types.ts').Item; url: string }>; abort: () => void } {
+/** PUTs a file to `url` with upload progress (fetch can't report it). */
+export function uploadFile<T>(file: File, url: string, onProgress: (fraction: number) => void): { done: Promise<T>; abort: () => void } {
 	const xhr = new XMLHttpRequest();
-	const q = new URLSearchParams({ name: file.name, expiry: opts.expiry });
-	q.set('burn', opts.burn ? '1' : '0');
-	const done = new Promise<{ item: import('#lib/types.ts').Item; url: string }>((resolve, reject) => {
-		xhr.open('PUT', `/api/files?${q}`);
+	const done = new Promise<T>((resolve, reject) => {
+		xhr.open('PUT', url);
 		xhr.setRequestHeader('accept', 'application/json');
 		if (file.type) xhr.setRequestHeader('content-type', file.type);
 		xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total);
@@ -49,7 +44,7 @@ export function uploadFile(
 			try {
 				data = JSON.parse(xhr.responseText);
 			} catch {}
-			if (xhr.status >= 200 && xhr.status < 300) resolve(data as { item: import('#lib/types.ts').Item; url: string });
+			if (xhr.status >= 200 && xhr.status < 300) resolve(data as T);
 			else reject(new ApiError(data.message ?? (xhr.status === 413 ? 'File too large' : `Upload failed (${xhr.status})`), xhr.status));
 		};
 		xhr.onerror = () => reject(new ApiError('Upload failed: network error', 0));

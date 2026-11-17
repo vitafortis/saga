@@ -10,6 +10,8 @@
 		FileText,
 		FileVideo,
 		Flame,
+		FolderOpen,
+		FolderPlus,
 		LoaderCircle,
 		LogIn,
 		Search,
@@ -19,7 +21,7 @@
 		X
 	} from '@lucide/svelte';
 	import { onMount, untrack } from 'svelte';
-	import { invalidateAll } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import CodeJump from '#lib/components/CodeJump.svelte';
 	import ShareResult from '#lib/components/ShareResult.svelte';
@@ -84,7 +86,8 @@
 				const total = files.reduce((n, f) => n + f.size, 0) || 1;
 				let sent = 0;
 				for (const file of files) {
-					const up = uploadFile(file, { expiry, burn }, (f) => (progress = (sent + f * file.size) / total));
+					const q = new URLSearchParams({ name: file.name, expiry, burn: burn ? '1' : '0' });
+					const up = uploadFile<Shared>(file, `/api/files?${q}`, (f) => (progress = (sent + f * file.size) / total));
 					abort = up.abort;
 					out.push(await up.done);
 					sent += file.size;
@@ -125,6 +128,19 @@
 	}
 
 	const isFileDrag = (e: DragEvent) => e.dataTransfer?.types.includes('Files');
+
+	// New collection: just a name here; files are added on its page.
+	let naming = $state(false);
+	let collectionName = $state('');
+	async function createCollection(e: SubmitEvent) {
+		e.preventDefault();
+		try {
+			const { collection } = await api.post<{ collection: { code: string } }>('/api/collections', { name: collectionName });
+			goto(`/collection/${collection.code}`);
+		} catch (err) {
+			toast('error', 'Couldn’t create', errorMessage(err));
+		}
+	}
 
 	// The Recent index: filter by kind, then search name, code (spaces optional) and type.
 	let kind = $state<'all' | 'paste' | 'file'>('all');
@@ -282,6 +298,45 @@
 			</div>
 		</div>
 	{/if}
+
+	<section class="mt-10">
+		<div class="mb-3 flex items-center gap-3">
+			<h2 class="text-sm font-semibold tracking-tight">Collections</h2>
+			<span class="hidden text-xs text-muted-foreground sm:inline">Config files and the like, installed with one command</span>
+			{#if !naming}
+				<button class="btn btn-secondary btn-sm ml-auto" onclick={() => (naming = true)}><FolderPlus />New collection</button>
+			{/if}
+		</div>
+		{#if naming}
+			<form class="card mb-3 flex items-center gap-2 p-2 pl-3" onsubmit={createCollection}>
+				<FolderPlus class="size-4 shrink-0 text-primary" />
+				<!-- svelte-ignore a11y_autofocus -->
+				<input class="input h-8 flex-1 border-0 bg-transparent px-1 shadow-none focus:ring-0" placeholder="Name, e.g. New Proxmox node" bind:value={collectionName} maxlength="200" autofocus />
+				<button class="btn btn-primary btn-sm" disabled={!collectionName.trim()}>Create</button>
+				<button type="button" class="btn btn-ghost btn-sm" onclick={() => ((naming = false), (collectionName = ''))}>Cancel</button>
+			</form>
+		{/if}
+		{#if data.collections.length}
+			<div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+				{#each data.collections as col (col.code)}
+					<a href="/collection/{col.code}" class="card group flex items-start gap-3 p-4 transition-colors hover:border-primary/40">
+						<div class="grid size-9 shrink-0 place-items-center rounded-lg bg-primary-soft text-primary"><FolderOpen class="size-4" /></div>
+						<div class="min-w-0">
+							<p class="truncate text-[0.8125rem] font-medium group-hover:text-primary">{col.name}</p>
+							<p class="mt-0.5 truncate text-xs text-muted-foreground">
+								{col.count} {col.count === 1 ? 'file' : 'files'} · {formatBytes(col.size)} · <span class="font-mono">{groupCode(col.code)}</span>
+							</p>
+							{#if col.description}<p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{col.description}</p>{/if}
+						</div>
+					</a>
+				{/each}
+			</div>
+		{:else if !naming}
+			<button class="card dot-grid w-full px-4 py-6 text-center text-[0.8125rem] text-muted-foreground hover:text-foreground" onclick={() => (naming = true)}>
+				Group dotfiles, configs and keys for setting up a machine.
+			</button>
+		{/if}
+	</section>
 
 	<section class="mt-10">
 		<div class="mb-3 flex flex-wrap items-center gap-3">

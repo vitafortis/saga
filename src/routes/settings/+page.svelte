@@ -34,6 +34,7 @@
 
 <svelte:head><title>Settings · Saga</title></svelte:head>
 
+<div class="max-w-3xl">
 <section class="mb-6">
 	<h1 class="text-xl font-semibold tracking-tight">Settings</h1>
 	<p class="mt-1 text-[0.8125rem] text-muted-foreground">Defaults for new items, on every device and for uploads from scripts.</p>
@@ -91,3 +92,4 @@
 		<HardDrive class="size-3" />Size limits are set with <span class="font-mono">SAGA_MAX_FILE_MB</span> and <span class="font-mono">SAGA_MAX_PASTE_MB</span>.
 	</p>
 </section>
+</div>
