@@ -1,4 +1,4 @@
-import { error } from '@sveltejs/kit';
+import { error, json } from '@sveltejs/kit';
 import { archive } from '#lib/server/bundle.ts';
 import { requireAuth } from '#lib/server/lookup.ts';
 import { contentDisposition, pasteFileName } from '#lib/server/send.ts';
@@ -9,7 +9,10 @@ import type { RequestHandler } from './$types';
 /** In the archive, text gets a .txt name; encrypted items keep their ciphertext and end in .enc. */
 const nameOf = (item: Item) => (item.kind === 'paste' ? pasteFileName({ ...item, encrypted: false }) : item.name) + (item.encrypted ? '.enc' : '');
 
-/** Several items as one .tar.gz: `?codes=12345678,23456789` (the Recent checkboxes). */
+/**
+ * Several items as one .tar.gz: `?codes=12345678,23456789` (the Recent checkboxes). With `&check`,
+ * only validates and answers in JSON, so the page can show a problem instead of a failed download.
+ */
 export const GET: RequestHandler = (event) => {
 	requireAuth(event);
 	const codes = [...new Set((event.url.searchParams.get('codes') ?? '').split(',').filter(Boolean))];
@@ -22,6 +25,7 @@ export const GET: RequestHandler = (event) => {
 		if (item.burn) error(400, `“${item.name || code}” is deleted after first open, so it can only be downloaded on its own`);
 		return item;
 	});
+	if (event.url.searchParams.has('check')) return json({ count: items.length });
 	const stamp = new Date().toISOString().slice(0, 10);
 	return new Response(archive(items, nameOf), {
 		headers: {

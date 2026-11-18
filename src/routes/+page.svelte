@@ -31,7 +31,7 @@
 	import PasswordFields, { passwordProblem } from '#lib/components/PasswordFields.svelte';
 	import ShareResult from '#lib/components/ShareResult.svelte';
 	import { api, errorMessage, readBytes, uploadFile } from '#lib/client/api.ts';
-	import { droppedFiles, folderMessage } from '#lib/client/files.ts';
+	import { droppedFiles, folderMessage, saveUrl } from '#lib/client/files.ts';
 	import { copy, toast } from '#lib/client/state.svelte.ts';
 	import { encrypt, encryptText } from '#lib/crypto.ts';
 	import { formatBytes, groupCode, relativeTime } from '#lib/format.ts';
@@ -190,8 +190,34 @@
 		if (allShown) for (const i of shown) selected.delete(i.code);
 		else for (const i of shown) selected.add(i.code);
 	}
-	const pickedBurn = $derived(picked.filter((i) => i.burn));
-	const downloadUrl = $derived(`/download?codes=${picked.map((i) => i.code).join(',')}`);
+
+	// One item downloads as itself; several as one .tar.gz, checked first so problems show here
+	// (a failed download only shows in the browser's downloads list). Once-only items are skipped:
+	// downloading them here would use up their one open.
+	let downloading = $state(false);
+	async function downloadPicked() {
+		const items = picked.filter((i) => !i.burn);
+		const skipped = picked.length - items.length;
+		const note = skipped ? `${skipped} delete-after-first-open ${skipped === 1 ? 'item was' : 'items were'} skipped; download ${skipped === 1 ? 'it' : 'them'} from ${skipped === 1 ? 'its' : 'their'} own page.` : '';
+		if (!items.length) return toast('error', 'Nothing to download', note);
+		if (items.length === 1) {
+			const [i] = items;
+			saveUrl(i.kind === 'file' ? `/file/${i.code}/download` : `/paste/${i.code}/raw?download`);
+		} else {
+			const url = `/download?codes=${items.map((i) => i.code).join(',')}`;
+			downloading = true;
+			try {
+				await api.get(`${url}&check`);
+				saveUrl(url);
+			} catch (err) {
+				toast('error', 'Couldn’t download', errorMessage(err));
+				return;
+			} finally {
+				downloading = false;
+			}
+		}
+		toast('success', items.length === 1 ? 'Downloading' : `Downloading ${items.length} items as .tar.gz`, note);
+	}
 
 	/** Clears the expiry: the item stays until it's deleted. */
 	async function keep(items: Item[]) {
@@ -440,11 +466,9 @@
 						<span class="text-xs font-medium">{selected.size} selected</span>
 						<button class="text-xs text-muted-foreground hover:text-foreground" onclick={() => selected.clear()}>Clear</button>
 						<div class="ml-auto flex flex-wrap items-center gap-2">
-							{#if pickedBurn.length}
-								<a class="btn btn-secondary btn-sm opacity-50" aria-disabled="true" title="Items deleted after first open can only be downloaded on their own. Untick them to download the rest." href={null}><Download />Download</a>
-							{:else}
-								<a class="btn btn-secondary btn-sm" href={downloadUrl} download title="Download as one .tar.gz"><Download />Download</a>
-							{/if}
+							<button class="btn btn-secondary btn-sm" onclick={downloadPicked} disabled={downloading} title="Several download as one .tar.gz">
+								{#if downloading}<LoaderCircle class="animate-spin" />{:else}<Download />{/if}Download
+							</button>
 							{#if picked.some((i) => i.expiresAt)}
 								<button class="btn btn-secondary btn-sm" onclick={() => keep(picked)} title="Cancel the expiry so they stay"><Forever />Keep</button>
 							{/if}
