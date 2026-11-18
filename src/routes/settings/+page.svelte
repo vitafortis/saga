@@ -36,12 +36,17 @@
 
 <svelte:head><title>Settings · Saga</title></svelte:head>
 
-<div class="max-w-3xl">
-<section class="mb-6">
+<section>
 	<h1 class="text-xl font-semibold tracking-tight">Settings</h1>
-	<p class="mt-1 text-[0.8125rem] text-muted-foreground">Defaults for new items, on every device and for uploads from scripts.</p>
+	<p class="mt-1 text-[0.8125rem] text-muted-foreground">Defaults, API keys, backups and storage for this Saga.</p>
 </section>
 
+<!-- Two columns on wide screens: everyday defaults and storage, then keys and backups (the longer lists). -->
+<div class="grid items-start gap-x-8 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+<div>
+<section class="mt-8">
+<h2 class="text-sm font-semibold tracking-tight">Defaults</h2>
+<p class="mt-0.5 mb-3 text-xs text-muted-foreground">For new items, on every device and for uploads from scripts.</p>
 <form class="card overflow-hidden" onsubmit={save}>
 	<div class="divide-y divide-border">
 		<div class="flex flex-col gap-3 p-5 sm:flex-row sm:items-center">
@@ -79,16 +84,14 @@
 		</button>
 	</div>
 </form>
-
-<ApiKeys keys={data.keys} />
-
-<Backups status={data.backups} />
+</section>
 
 <section class="mt-8">
 	<h2 class="mb-3 text-sm font-semibold tracking-tight">Storage</h2>
-	<div class="card grid grid-cols-2 divide-x divide-border sm:grid-cols-4">
-		{#each [{ label: 'Items', value: String(data.usage.count) }, { label: 'Stored', value: formatBytes(data.usage.bytes) }, { label: 'Largest file', value: formatBytes(data.maxFileBytes) }, { label: 'Largest paste', value: formatBytes(data.maxPasteBytes) }] as s, i (s.label)}
-			<div class="p-4 {i >= 2 ? 'border-t border-border sm:border-t-0' : ''}">
+	<!-- gap-px over the border colour draws the dividers, whatever the column count. -->
+	<div class="card grid grid-cols-2 gap-px overflow-hidden bg-border sm:grid-cols-4 lg:grid-cols-2 xl:grid-cols-4">
+		{#each [{ label: 'Items', value: String(data.usage.count) }, { label: 'Stored', value: formatBytes(data.usage.bytes) }, { label: 'Largest file', value: formatBytes(data.maxFileBytes) }, { label: 'Largest paste', value: formatBytes(data.maxPasteBytes) }] as s (s.label)}
+			<div class="bg-card p-4">
 				<p class="text-xs text-muted-foreground">{s.label}</p>
 				<p class="mt-1 text-lg font-semibold tracking-tight tabular-nums">{s.value}</p>
 			</div>
@@ -98,4 +101,11 @@
 		<HardDrive class="size-3" />Size limits are set with <span class="font-mono">SAGA_MAX_FILE_MB</span> and <span class="font-mono">SAGA_MAX_PASTE_MB</span>.
 	</p>
 </section>
+</div>
+
+<div>
+<ApiKeys keys={data.keys} />
+
+<Backups status={data.backups} />
+</div>
 </div>
