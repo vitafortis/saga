@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronLeft, Clock, Infinity as Forever, Eye, File as FileIcon, FileText, Flame, FolderOpen, HardDriveDownload, Link, LoaderCircle, Lock, QrCode, Trash2 } from '@lucide/svelte';
+	import { ChevronLeft, Clock, CloudUpload, Infinity as Forever, Eye, File as FileIcon, FileText, Flame, FolderOpen, HardDriveDownload, Link, LoaderCircle, Lock, QrCode, Trash2 } from '@lucide/svelte';
 	import type { Snippet } from 'svelte';
 	import { slide } from 'svelte/transition';
 	import { goto, invalidateAll } from '$app/navigation';
@@ -25,6 +25,18 @@
 			toast('error', 'Couldn’t save', errorMessage(err));
 		}
 		saving = false;
+	}
+
+	let sending = $state(false);
+	async function sendToCloud() {
+		sending = true;
+		try {
+			const { path } = await api.post<{ path: string }>(`/api/items/${item.code}/send`);
+			toast('success', `Sent to ${page.data.cloud}`, path);
+		} catch (err) {
+			toast('error', 'Couldn’t send', errorMessage(err));
+		}
+		sending = false;
 	}
 
 	async function keep() {
@@ -80,6 +92,11 @@
 		{#if page.data.backups && page.data.authed && !item.burn}
 			<button class="btn btn-secondary btn-icon btn-sm" onclick={saveToNas} disabled={saving} aria-label="Save to NAS" title="Save a copy to the NAS">
 				{#if saving}<LoaderCircle class="animate-spin" />{:else}<HardDriveDownload />{/if}
+			</button>
+		{/if}
+		{#if page.data.cloud && page.data.authed && !item.burn}
+			<button class="btn btn-secondary btn-icon btn-sm" onclick={sendToCloud} disabled={sending} aria-label="Send to {page.data.cloud}" title="Send a copy to {page.data.cloud}">
+				{#if sending}<LoaderCircle class="animate-spin" />{:else}<CloudUpload />{/if}
 			</button>
 		{/if}
 		<button class="btn btn-secondary btn-sm" onclick={() => copy(url, 'Link copied')}><Link />Link</button>

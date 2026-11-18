@@ -28,6 +28,13 @@ export const BACKUP_HOURS = Math.max(0, Number(env.SAGA_BACKUP_HOURS ?? 24) || 0
 export const BACKUP_KEEP = Math.max(1, Number(env.SAGA_BACKUP_KEEP) || 14);
 
 /** Digits in new shortcodes. */
+/** An rclone remote and folder for Send to cloud, like `gdrive:Saga`; unset means off. */
+export const CLOUD_REMOTE = (env.SAGA_CLOUD_REMOTE ?? '').trim().replace(/\/+$/, '');
+/** What the button calls it: "Send to Google Drive". */
+export const CLOUD_NAME = (env.SAGA_CLOUD_NAME ?? '').trim() || 'Google Drive';
+/** The rclone binary (the image includes one). */
+export const RCLONE = env.SAGA_RCLONE || 'rclone';
+
 export const CODE_LENGTH = Math.min(12, Math.max(6, Number(env.SAGA_CODE_LENGTH) || 8));
 
 if (!PASSWORD) console.warn('[saga] SAGA_PASSWORD is not set, so there is no sign-in: anyone who can reach Saga can share. Fine behind SSO; otherwise set it.');

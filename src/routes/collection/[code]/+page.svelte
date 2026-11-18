@@ -1,6 +1,7 @@
 <script lang="ts">
 	import {
 		Check,
+		CloudUpload,
 		Copy,
 		Download,
 		File as FileIcon,
@@ -70,6 +71,18 @@
 			toast('error', 'Couldn’t save', errorMessage(err));
 		}
 		savingNas = false;
+	}
+
+	let sendingCloud = $state(false);
+	async function sendToCloud() {
+		sendingCloud = true;
+		try {
+			const { path } = await api.post<{ path: string }>(`/api/collections/${c.code}/send`);
+			toast('success', `Sent to ${page.data.cloud}`, path);
+		} catch (err) {
+			toast('error', 'Couldn’t send', errorMessage(err));
+		}
+		sendingCloud = false;
 	}
 
 	// Name and description, edited in place.
@@ -252,6 +265,11 @@
 		{#if page.data.backups && authed}
 			<button class="btn btn-secondary btn-sm" onclick={saveToNas} disabled={savingNas} title="Copy the files to the NAS, at their target paths">
 				{#if savingNas}<LoaderCircle class="animate-spin" />{:else}<HardDriveDownload />{/if}Save to NAS
+			</button>
+		{/if}
+		{#if page.data.cloud && authed}
+			<button class="btn btn-secondary btn-sm" onclick={sendToCloud} disabled={sendingCloud} title="Copy the files to {page.data.cloud}, at their target paths">
+				{#if sendingCloud}<LoaderCircle class="animate-spin" />{:else}<CloudUpload />{/if}Send to {page.data.cloud}
 			</button>
 		{/if}
 		<button class="btn btn-secondary btn-sm" onclick={() => copy(url, 'Link copied')}><Link />Link</button>

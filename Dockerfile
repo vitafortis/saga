@@ -15,11 +15,14 @@ RUN pnpm build && pnpm prune --prod
 
 FROM node:24-alpine
 LABEL org.opencontainers.image.source=https://github.com/vitafortis/saga
+# rclone, for Send to Google Drive (SAGA_CLOUD_REMOTE).
+RUN apk add --no-cache rclone
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
     SAGA_DATA_DIR=/data \
-    NODE_OPTIONS=--disable-warning=ExperimentalWarning
+    NODE_OPTIONS=--disable-warning=ExperimentalWarning \
+    RCLONE_CONFIG=/config/rclone/rclone.conf
 # Uploads are streamed to disk and capped by SAGA_MAX_FILE_MB, not by the server's
 # default 512 KB body limit.
 ENV BODY_SIZE_LIMIT=Infinity

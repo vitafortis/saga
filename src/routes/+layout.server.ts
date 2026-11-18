@@ -1,5 +1,5 @@
 import { passwordRequired } from '#lib/server/auth.ts';
-import { BACKUP_DIR, MAX_FILE_BYTES, MAX_PASTE_BYTES } from '#lib/server/config.ts';
+import { BACKUP_DIR, CLOUD_NAME, CLOUD_REMOTE, MAX_FILE_BYTES, MAX_PASTE_BYTES } from '#lib/server/config.ts';
 import { getSettings } from '#lib/server/settings.ts';
 import type { LayoutServerLoad } from './$types';
 
@@ -11,5 +11,7 @@ export const load: LayoutServerLoad = ({ locals }) => ({
 	origin: locals.origin,
 	settings: getSettings(),
 	/** A NAS folder is set up: show Save to NAS. */
-	backups: !!BACKUP_DIR
+	backups: !!BACKUP_DIR,
+	/** Send to Google Drive (or whatever SAGA_CLOUD_NAME says) is set up. */
+	cloud: CLOUD_REMOTE ? CLOUD_NAME : null
 });

@@ -68,6 +68,8 @@ Don't bypass `/api/` as a whole: the web app's own API has no auth of its own be
 | `SAGA_BACKUP_DIR` | unset | NAS folder for snapshots and saved copies (`/backups` in `compose.yaml`). Unset: backups are off. |
 | `SAGA_BACKUP_HOURS` | `24` | Hours between snapshots; `0` for only when you click *Back up now*. |
 | `SAGA_BACKUP_KEEP` | `14` | Snapshots kept; older ones are deleted. |
+| `SAGA_CLOUD_REMOTE` | unset | rclone remote and folder for *Send to Google Drive*, e.g. `gdrive:Saga`. Unset: the button is hidden. |
+| `SAGA_CLOUD_NAME` | `Google Drive` | What the button calls it, if the remote is something else (Dropbox, OneDrive, S3…). |
 
 ## Collections
 
@@ -119,6 +121,25 @@ docker compose run --rm --no-deps -v /path/to/nas/snapshots:/restore:ro --entryp
 docker compose up -d
 ```
 
+## Send to Google Drive
+
+A cloud button on items (next to Save to NAS), and **Send to Google Drive** on collections, copy them to Google Drive in the same layout as the NAS: `Saga/text/`, `Saga/files/` and `Saga/collections/<name (code)>/`. Sending again replaces the earlier copy. Encrypted items stay encrypted, and delete-after-first-open items aren't sent.
+
+Saga uses [rclone](https://rclone.org) (in the image) to talk to Drive, so any rclone remote works: set `SAGA_CLOUD_NAME` to match. To set up Drive:
+
+1. On a computer with a browser and rclone, make the remote. `drive.file` lets it see only the files it creates, not the rest of your Drive:
+   ```sh
+   rclone config create gdrive drive scope=drive.file
+   ```
+   A browser opens to sign in to Google.
+2. Copy the config next to `compose.yaml` on the server, owned by the container's user:
+   ```sh
+   mkdir -p rclone && cp ~/.config/rclone/rclone.conf rclone/ && sudo chown -R 1000:1000 rclone
+   ```
+3. In `compose.yaml`, uncomment `SAGA_CLOUD_REMOTE: gdrive:Saga` and the `./rclone:/config/rclone` mount, then `docker compose up -d`.
+
+If Google ever signs it out, sending fails with a message saying so: run `rclone config reconnect gdrive:` and copy the config over again.
+
 ## sagacp
 
 A small shell CLI for sharing and fetching. In Settings → **API keys**, make a key; Saga then shows a one-line command that saves the key to `~/.config/saga/token` and installs `sagacp` to `~/.local/bin`.
@@ -165,6 +186,8 @@ curl -sH "$H" https://data.armgrp.dev/api/v1/paste/12345678/raw
 | `GET /api/v1/collections/<code>/archive` | Everything as `.tar.gz`. |
 | `POST /api/v1/items/<code>/save` | Copy to the NAS folder: `{ path }`. |
 | `POST /api/v1/collections/<code>/save` | Mirror to the NAS folder: `{ path }`. |
+| `POST /api/v1/items/<code>/send` | Send to Google Drive (`SAGA_CLOUD_REMOTE`): `{ path }`. |
+| `POST /api/v1/collections/<code>/send` | Send a collection to Google Drive: `{ path }`. |
 | `GET /api/v1/sagacp` | The CLI. |
 | `GET /api/v1/health` | `{ ok: true }`, no key needed. |
 

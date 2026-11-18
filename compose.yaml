@@ -35,10 +35,16 @@ services:
       # SAGA_BACKUP_DIR: /backups
       # SAGA_BACKUP_HOURS: "24"
       # SAGA_BACKUP_KEEP: "14"
+      # Send to Google Drive: an rclone remote and folder, plus the ./rclone mount below.
+      # Make the remote with `rclone config` on a machine with a browser (see readme.md).
+      # SAGA_CLOUD_REMOTE: gdrive:Saga
+      # SAGA_CLOUD_NAME: Google Drive
     volumes:
       # Database, uploaded files and the session key.
       - saga-data:/data
       # - nas-backups:/backups
+      # rclone's config, writable so it can refresh the Google sign-in (owned by uid 1000).
+      # - ./rclone:/config/rclone
 
 volumes:
   saga-data:

@@ -141,39 +141,52 @@ async function writeItem(item: Item, path: string) {
 	await rename(tmp, path);
 }
 
+/** An item's name in a saved copy: `name (code).ext`, .txt for text, .enc when encrypted. */
+export function savedName(item: Item): string {
+	const name = item.kind === 'paste' ? `${safe(item.name || 'paste')}${/\.\w{1,8}$/.test(item.name) ? '' : '.txt'}` : safe(item.name);
+	return withCode(name, item.code) + (item.encrypted ? '.enc' : '');
+}
+
+/** Where a saved item goes: text/ or files/. */
+export const savedFolder = (item: Item) => (item.kind === 'paste' ? 'text' : 'files');
+
 /** Copies one item to saved/text or saved/files. Returns the path, relative to the backup folder. */
 export async function saveItem(item: Item): Promise<string> {
 	if (!BACKUP_DIR) throw new BackupsOffError();
-	const name = item.kind === 'paste' ? `${safe(item.name || 'paste')}${/\.\w{1,8}$/.test(item.name) ? '' : '.txt'}` : safe(item.name);
-	const rel = join('saved', item.kind === 'paste' ? 'text' : 'files', withCode(name, item.code) + (item.encrypted ? '.enc' : ''));
+	const rel = join('saved', savedFolder(item), savedName(item));
 	await writeItem(item, join(BACKUP_DIR, rel));
 	return rel;
 }
 
+/** A collection's folder name in saved copies; re-saving overwrites it, renamed or not. */
+export const collectionFolder = (collection: Collection) => withCode(safe(collection.name), collection.code);
+
 /**
- * Mirrors a collection to saved/collections/<name (code)>/: files at their target paths
- * (~/ under home/, / under root/), unplaced ones under unplaced/, plus its install.sh.
- * Replaces any earlier copy, including one saved under an old name.
+ * Writes a collection as a folder tree into `dir` (which must not exist yet): files at their
+ * target paths (~/ under home/, / under root/), unplaced ones under unplaced/, plus install.sh.
  */
+export async function writeCollectionTree(dir: string, collection: Collection, items: Item[], url: string) {
+	await mkdir(dir, { recursive: true });
+	const used = new Set<string>();
+	for (const item of items) {
+		const parts = item.path ? [item.path.startsWith('~/') ? 'home' : 'root', ...item.path.replace(/^~?\/+/, '').split('/')] : ['unplaced', item.name];
+		let file = join(dir, ...parts.map(safe)) + (item.encrypted ? '.enc' : '');
+		if (used.has(file)) file = join(dir, 'unplaced', withCode(safe(item.name), item.code));
+		used.add(file);
+		await writeItem(item, file);
+	}
+	await writeFile(join(dir, 'install.sh'), await installScript(collection, items, url), { mode: 0o700 });
+}
+
 export async function saveCollection(collection: Collection, items: Item[], url: string): Promise<string> {
 	if (!BACKUP_DIR) throw new BackupsOffError();
 	const parent = join(SAVED(), 'collections');
 	await mkdir(parent, { recursive: true });
-	const rel = join('saved', 'collections', withCode(safe(collection.name), collection.code));
+	const rel = join('saved', 'collections', collectionFolder(collection));
 	const tmp = join(parent, `.${collection.code}.saga-part`);
 	await rm(tmp, { recursive: true, force: true });
 	try {
-		const used = new Set<string>();
-		for (const item of items) {
-			const parts = item.path
-				? [item.path.startsWith('~/') ? 'home' : 'root', ...item.path.replace(/^~?\/+/, '').split('/')]
-				: ['unplaced', item.name];
-			let file = join(tmp, ...parts.map(safe)) + (item.encrypted ? '.enc' : '');
-			if (used.has(file)) file = join(tmp, 'unplaced', withCode(safe(item.name), item.code));
-			used.add(file);
-			await writeItem(item, file);
-		}
-		await writeFile(join(tmp, 'install.sh'), await installScript(collection, items, url), { mode: 0o700 });
+		await writeCollectionTree(tmp, collection, items, url);
 		// Move earlier copies aside (the collection may have been renamed), swap in the new one, then drop them.
 		const old = join(parent, `.${collection.code}.saga-old`);
 		await rm(old, { recursive: true, force: true });
