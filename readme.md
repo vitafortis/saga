@@ -153,9 +153,10 @@ sagacp 12345678                     # fetch: files and collections saved here, t
 sagacp --install 12345678           # install a collection (--dry-run to preview, --root for /etc)
 sagacp -p -1 ~/.ssh/id_ed25519      # encrypt with a password first (asked twice), delete after first open
 sagacp --save 12345678              # copy an item or collection to the NAS folder
+sagacp --info 12345678              # what it is: size, expiry, views (doesn't open it)
 ```
 
-Options: `-e/--expire 10m|1h|1d|7d|30d|never`, `-1/--once`, `-k/--keep`, `-n/--name`, `-p/--encrypt`, `-q/--quiet` (links only), `--no-copy`. Fetching an encrypted item asks for its password and decrypts it; on a wrong password the encrypted copy is kept (as `name.enc`) so nothing is lost. `SAGA_PASS` skips the prompts, for scripts. Left out, expiry and delete-after-open use the defaults from Settings. Fetching never overwrites a file: a clash is saved as `name.1`. It needs `sh`, `curl` and `od`; `tar` for folders; `openssl` 1.1.1+ for encryption.
+Options: `-e/--expire 10m|1h|1d|7d|30d|never`, `-1/--once`, `-k/--keep`, `-n/--name`, `-p/--encrypt`, `-q/--quiet` (links and paths only), `-v/--verbose` (item details, HTTP status, size, time and speed), `--no-copy`. Fetching says what it's getting (`fetching notes: text, 12 B, expires in 23h`) and what it saved, with a progress bar for anything over 1 MB; that all goes to stderr, so piped text stays clean. Fetching an encrypted item asks for its password and decrypts it; on a wrong password the encrypted copy is kept (as `name.enc`) so nothing is lost. `SAGA_PASS` skips the prompts, for scripts. Left out, expiry and delete-after-open use the defaults from Settings. Fetching never overwrites a file: a clash is saved as `name.1`. It needs `sh`, `curl` and `od`; `tar` for folders; `openssl` 1.1.1+ for encryption.
 
 ## API
 

@@ -9,8 +9,10 @@
 #   sagacp --install 12345678      install a collection's files (--dry-run to preview, --root for /etc)
 #   sagacp -p ~/.ssh/id_ed25519    encrypt with a password first; fetching asks for it (or set SAGA_PASS)
 #   sagacp --save 12345678         copy an item or collection to Saga's NAS folder
+#   sagacp --info 12345678         what a code is (size, expiry…) without fetching or opening it
 #
-# Options: -e/--expire 10m|1h|1d|7d|30d|never  -1/--once  -k/--keep  -n/--name NAME  -p/--encrypt  -q/--quiet  --no-copy
+# Options: -e/--expire 10m|1h|1d|7d|30d|never  -1/--once  -k/--keep  -n/--name NAME  -p/--encrypt
+#          -q/--quiet (links and paths only)  -v/--verbose (details, HTTP status, timings)  --no-copy
 # API key (Saga > Settings > API keys): SAGA_TOKEN, or the first line of ~/.config/saga/token
 set -eu
 
@@ -23,12 +25,15 @@ auth="Authorization: Bearer $token"
 # Everything goes through /api/v1, the part of Saga a proxy lets through on an API key alone.
 API="$SAGA_URL/api/v1"
 
-expiry='' burn='' name='' quiet=0 copy=1 install='' dry=0 root=0 encrypt=0 save=''
+expiry='' burn='' name='' quiet=0 verbose=0 copy=1 install='' dry=0 root=0 encrypt=0 save='' info_code=''
 
 usage() {
-	sed -n '2,14s/^# \{0,1\}//p' "$0" 2>/dev/null || echo "usage: sagacp [options] [file|dir|code ...]"
+	sed -n '2,16s/^# \{0,1\}//p' "$0" 2>/dev/null || echo "usage: sagacp [options] [file|dir|code ...]"
 }
 die() { echo "sagacp: $*" >&2; exit 1; }
+# Progress and results go to stderr, so stdout stays just the text or the links.
+say() { [ "$quiet" = 1 ] || echo "$*" >&2; }
+detail() { printf '  %-9s %s\n' "$1" "$2" >&2; }
 
 while [ $# -gt 0 ]; do
 	case $1 in
@@ -38,6 +43,8 @@ while [ $# -gt 0 ]; do
 		-n | --name) [ $# -ge 2 ] || die "$1 needs a value"; name=$2; shift 2 ;;
 		-p | --encrypt) encrypt=1; shift ;;
 		-q | --quiet) quiet=1; shift ;;
+		-v | --verbose) verbose=1; shift ;;
+		--info) [ $# -ge 2 ] || die "$1 needs a code"; info_code=$2; shift 2 ;;
 		--no-copy) copy=0; shift ;;
 		-i | --install) [ $# -ge 2 ] || die "$1 needs a collection code"; install=$2; shift 2 ;;
 		--save) [ $# -ge 2 ] || die "$1 needs a code"; save=$2; shift 2 ;;
@@ -69,9 +76,12 @@ query() {
 
 # Runs curl, prints the body on success, or the server's message on failure.
 request() {
-	out=$(curl -sS -w '\n%{http_code}' -H "$auth" -H 'Accept: text/plain' "$@") || die "can't reach $SAGA_URL"
-	status=$(printf %s "$out" | tail -n 1)
+	out=$(curl -sS -w '\n%{http_code} %{size_upload} %{time_total}' -H "$auth" -H 'Accept: text/plain' "$@") || die "can't reach $SAGA_URL"
+	stats=$(printf %s "$out" | tail -n 1)
+	status=${stats%% *}
 	body=$(printf %s "$out" | sed '$d')
+	# shellcheck disable=SC2086
+	[ "$verbose" = 1 ] && set -- $stats && [ "$2" != 0 ] && detail HTTP "$1, sent $(human "$2") in $(secs "$3")"
 	case $status in
 		2??) printf '%s\n' "$body" ;;
 		401) die "API key not accepted: check $config (or SAGA_TOKEN), or make a new one in Settings" ;;
@@ -81,6 +91,66 @@ request() {
 			[ -n "$msg" ] || msg=$(printf %s "$body" | sed -n 's/.*<title>\(.*\)<\/title>.*/\1/p' | head -n 1)
 			die "${msg:-${body:-HTTP $status}}" ;;
 	esac
+}
+
+# Reads one field from Saga's JSON: strings with jstr, numbers, true/false and null with jval.
+jstr() { printf %s "$2" | sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p" | head -n 1; }
+jval() { printf %s "$2" | sed -n "s/.*\"$1\":\([0-9a-z.]*\).*/\1/p" | head -n 1; }
+
+# 1536 → 1.5 KB
+human() { awk -v b="${1:-0}" 'BEGIN { split("B KB MB GB TB", u, " "); i = 1; while (b >= 1024 && i < 5) { b /= 1024; i++ } printf(i == 1 ? "%d %s" : "%.1f %s", b, u[i]) }'; }
+
+# 0.0147 → 15 ms, 2.31 → 2.3 s
+secs() { awk -v t="$1" 'BEGIN { if (t < 1) printf("%d ms", t * 1000 + 0.5); else printf("%.1f s", t) }'; }
+
+# A time in ms since 1970 → "in 3h" or "2d ago".
+when() {
+	awk -v t="$1" -v now="$(date +%s)" 'BEGIN { d = int(t / 1000) - now; s = d < 0 ? -d : d
+		v = s < 60 ? s "s" : s < 3600 ? int(s / 60) "m" : s < 86400 ? int(s / 3600) "h" : int(s / 86400) "d"
+		print (d < 0 ? v " ago" : "in " v) }'
+}
+
+# One line about a code, from resolve: "file, 1.2 MB, expires in 3h, encrypted".
+describe() {
+	case $(jstr kind "$1") in
+		collection)
+			n=$(jval count "$1")
+			printf 'collection, %s %s, %s' "$n" "$([ "$n" = 1 ] && echo file || echo files)" "$(human "$(jval size "$1")")" ;;
+		*)
+			exp=$(jval expiresAt "$1")
+			printf '%s, %s, %s' "$([ "$(jstr kind "$1")" = paste ] && echo text || echo file)" "$(human "$(jval size "$1")")" \
+				"$([ "$exp" = null ] && echo 'never expires' || echo "expires $(when "$exp")")"
+			[ "$(jval encrypted "$1")" = true ] && printf ', encrypted'
+			[ "$(jval burn "$1")" = true ] && printf ', deleted once opened'
+			;;
+	esac
+}
+
+# The rest, for -v and --info.
+details() { # details <resolve json> <code>
+	detail code "$(printf %s "$2" | cut -c1-4) $(printf %s "$2" | cut -c5-)"
+	if [ "$(jstr kind "$1")" = collection ]; then
+		detail updated "$(when "$(jval updatedAt "$1")")"
+		detail link "$SAGA_URL/collection/$2"
+	else
+		detail type "$(jstr mime "$1")"
+		detail size "$(jval size "$1") bytes"
+		detail shared "$(when "$(jval createdAt "$1")")"
+		detail views "$(jval views "$1")"
+		detail link "$SAGA_URL/$(jstr kind "$1")/$2"
+	fi
+}
+
+# curl for fetching into a file: a progress bar for big downloads on a terminal, and with -v the
+# HTTP status, size, time and speed.
+get() { # get <file> [curl options...] <url>
+	file=$1; shift
+	w='%{http_code} %{size_download} %{time_total} %{speed_download}'
+	if [ "${bar:-0}" = 1 ]; then s=$(curl -#Sf -w "$w" -o "$file" "$@") || return 1
+	else s=$(curl -sSf -w "$w" -o "$file" "$@") || return 1; fi
+	# shellcheck disable=SC2086
+	[ "$verbose" = 1 ] && set -- $s && detail HTTP "$1, $(human "$2") in $(secs "$3") ($(human "${4%.*}")/s)"
+	return 0
 }
 
 # Encryption is openssl's own format (the same as Saga's web app), so plain `openssl enc -d` works too.
@@ -171,7 +241,7 @@ unique() { t=$1 i=1; while [ -e "$t" ]; do t="$1.$i"; i=$((i + 1)); done; printf
 download() { # download <url> [curl options...]
 	url=$1; shift
 	tmp=$(mktemp ./.sagacp.XXXXXX) hdr=$(mktemp)
-	if ! curl -sSf -D "$hdr" -o "$tmp" -H "$auth" "$@" "$url"; then rm -f "$tmp" "$hdr"; return 1; fi
+	if ! get "$tmp" -D "$hdr" -H "$auth" "$@" "$url"; then rm -f "$tmp" "$hdr"; return 1; fi
 	n=$(sed -n 's/.*filename="\([^"]*\)".*/\1/p' "$hdr" | tr -d '\r' | head -n 1)
 	rm -f "$hdr"
 	n=$(basename "${n:-download}")
@@ -180,6 +250,7 @@ download() { # download <url> [curl options...]
 		if unseal -in "$tmp" -out "$plain"; then
 			rm -f "$tmp"
 			tmp=$plain n=${n%.enc}
+			[ "$verbose" = 1 ] && detail decrypt ok
 		else
 			rm -f "$plain"
 			target=$(unique "$n")
@@ -189,7 +260,9 @@ download() { # download <url> [curl options...]
 	fi
 	target=$(unique "$n")
 	mv "$tmp" "$target"
-	[ "$quiet" = 1 ] && echo "$target" || echo "saved $target" >&2
+	if [ "$quiet" = 1 ]; then echo "$target"; else
+		echo "saved $target ($(human "$(wc -c <"$target" | tr -d ' ')"))$([ "${method:-}" = POST ] && echo ', now deleted from Saga')" >&2
+	fi
 }
 
 # What a code points to: paste, file or collection (and, for items, whether it burns or is encrypted).
@@ -198,6 +271,12 @@ resolve() { request "$API/resolve/$1"; }
 fetch() { # fetch <code>
 	code=$(printf %s "$1" | tr -d ' -')
 	info=$(resolve "$code")
+	label=$(jstr name "$info")
+	say "fetching ${label:-$code}: $(describe "$info")"
+	[ "$verbose" = 1 ] && details "$info" "$code"
+	# A progress bar for anything over 1 MB, on a terminal.
+	bar=0
+	[ "$quiet" = 0 ] && [ -t 2 ] && [ "$(jval size "$info")" -gt 1048576 ] 2>/dev/null && bar=1
 	# Delete-after-first-open items only open with a POST.
 	case $info in *'"burn":true'*) method=POST ;; *) method=GET ;; esac
 	case $info in *'"encrypted":true'*) enc=1; ask_password "Password for $code" ;; *) enc=0 ;; esac
@@ -205,14 +284,20 @@ fetch() { # fetch <code>
 		*'"kind":"paste"'*)
 			if [ "$enc" = 1 ]; then
 				tmp=$(mktemp)
-				curl -sSf -H "$auth" -X "$method" -o "$tmp" "$API/paste/$code/raw" || { rm -f "$tmp"; die "couldn't fetch $code"; }
+				get "$tmp" -H "$auth" -X "$method" "$API/paste/$code/raw" || { rm -f "$tmp"; die "couldn't fetch $code"; }
 				unseal -a -A -in "$tmp" && { rm -f "$tmp"; return; }
 				target=$(unique "$code.txt.b64.enc")
 				mv "$tmp" "$target"
 				die "wrong password; the encrypted text is saved as $target (decrypt: openssl enc -d $CIPHER -a -A -in $target)"
 			fi
 			# Straight to stdout (not via request), so the text comes out byte for byte.
-			curl -sSf -H "$auth" -X "$method" "$API/paste/$code/raw" || die "couldn't fetch $code" ;;
+			# Via a temp file (pastes are small), so -v can report on it; then out byte for byte.
+			tmp=$(mktemp)
+			get "$tmp" -H "$auth" -X "$method" "$API/paste/$code/raw" || { rm -f "$tmp"; die "couldn't fetch $code"; }
+			cat "$tmp"
+			rm -f "$tmp"
+			if [ "$method" = POST ]; then say "(now deleted from Saga)"; fi
+			;;
 		*'"kind":"file"'*)
 			download "$API/file/$code/download" -X "$method" || die "couldn't download $code" ;;
 		*'"kind":"collection"'*)
@@ -254,7 +339,14 @@ copy_link() {
 	done
 }
 
-if [ -n "$install" ]; then
+if [ -n "$info_code" ]; then
+	code=$(printf %s "$info_code" | tr -d ' -')
+	info=$(resolve "$code")
+	label=$(jstr name "$info")
+	echo "${label:-$code}: $(describe "$info")"
+	details "$info" "$code" 2>&1
+	exit 0
+elif [ -n "$install" ]; then
 	install_collection "$install"
 	exit 0
 elif [ -n "$save" ]; then
